@@ -3,14 +3,15 @@ import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
 import {
   LayoutDashboard, Users, Ticket, Wallet, RefreshCw, Loader2, ArrowLeft,
-  Image, Plus, Pencil, Trash2, ChevronUp, ChevronDown, Eye, EyeOff, X, Save, ExternalLink
+  Image, Plus, Pencil, Trash2, ChevronUp, ChevronDown, Eye, EyeOff, X, Save, ExternalLink,
+  ArrowDownCircle, ArrowUpCircle, CheckCircle2, XCircle, Clock,
 } from "lucide-react";
 import { useState, useEffect } from "react";
 import { useLocation } from "wouter";
 import { format } from "date-fns";
 import { toast } from "sonner";
 
-type Tab = "overview" | "users" | "bets" | "transactions" | "banners";
+type Tab = "overview" | "users" | "bets" | "transactions" | "crypto" | "banners";
 
 interface BannerForm {
   title: string;
@@ -42,6 +43,38 @@ export default function Admin() {
   const txQuery = trpc.admin.transactions.useQuery(undefined, { enabled: user?.role === "admin" });
   const balancesQuery = trpc.admin.balances.useQuery(undefined, { enabled: user?.role === "admin" });
   const bannersQuery = trpc.admin.bannerList.useQuery(undefined, { enabled: user?.role === "admin" && tab === "banners" });
+  const cryptoDepositsQuery = trpc.admin.cryptoDeposits.useQuery(undefined, { enabled: user?.role === "admin" && tab === "crypto" });
+  const pendingWithdrawalsQuery = trpc.admin.pendingWithdrawals.useQuery(undefined, { enabled: user?.role === "admin" && tab === "crypto" });
+  const allWithdrawalsQuery = trpc.admin.cryptoWithdrawals.useQuery(undefined, { enabled: user?.role === "admin" && tab === "crypto" });
+  const hotWalletQuery = trpc.admin.hotWalletBalances.useQuery(undefined, { enabled: user?.role === "admin" && tab === "crypto" });
+  const depositWalletsQuery = trpc.admin.depositWalletBalances.useQuery(undefined, { enabled: user?.role === "admin" && tab === "crypto" });
+
+  const approveMut = trpc.admin.approveWithdrawal.useMutation({
+    onSuccess: () => {
+      toast.success("Çekim onaylandı");
+      pendingWithdrawalsQuery.refetch();
+      allWithdrawalsQuery.refetch();
+    },
+    onError: (e) => toast.error(e.message),
+  });
+
+  const rejectMut = trpc.admin.rejectWithdrawal.useMutation({
+    onSuccess: () => {
+      toast.success("Çekim reddedildi, bakiye iade edildi");
+      pendingWithdrawalsQuery.refetch();
+      allWithdrawalsQuery.refetch();
+    },
+    onError: (e) => toast.error(e.message),
+  });
+
+  const sweepAllMut = trpc.admin.sweepAll.useMutation({
+    onSuccess: (data) => {
+      toast.success(`Sweep tamamlandı: ${data.totalSwept.toFixed(2)} USDT toplandı (${data.results.length} adres)`);
+      hotWalletQuery.refetch();
+      depositWalletsQuery.refetch();
+    },
+    onError: (e) => toast.error(e.message),
+  });
 
   const settleMut = trpc.admin.settle.useMutation({
     onSuccess: (data) => {
@@ -69,6 +102,7 @@ export default function Admin() {
     { value: "users" as Tab, label: "Kullanıcılar", icon: Users },
     { value: "bets" as Tab, label: "Kuponlar", icon: Ticket },
     { value: "transactions" as Tab, label: "İşlemler", icon: Wallet },
+    { value: "crypto" as Tab, label: "Kripto", icon: ArrowDownCircle },
     { value: "banners" as Tab, label: "Bannerlar", icon: Image },
   ];
 
@@ -221,6 +255,304 @@ export default function Admin() {
                 ))}
               </tbody>
             </table>
+          </div>
+        </div>
+      )}
+
+      {/* Crypto */}
+      {tab === "crypto" && (
+        <div className="space-y-6">
+          {/* Hot Wallet & Deposit Wallet Balances */}
+          <div>
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-lg font-bold text-foreground flex items-center gap-2">
+                <Wallet className="h-5 w-5 text-primary" />
+                Cüzdan Bakiyeleri
+              </h2>
+              <div className="flex items-center gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => { hotWalletQuery.refetch(); depositWalletsQuery.refetch(); }}
+                  disabled={hotWalletQuery.isRefetching || depositWalletsQuery.isRefetching}
+                >
+                  <RefreshCw className={`h-3.5 w-3.5 mr-1 ${hotWalletQuery.isRefetching ? "animate-spin" : ""}`} />
+                  Yenile
+                </Button>
+                <Button
+                  size="sm"
+                  onClick={() => {
+                    if (confirm("Tüm deposit adreslerindeki bakiyeyi hot wallet'a toplamak istediğinizden emin misiniz?")) {
+                      sweepAllMut.mutate();
+                    }
+                  }}
+                  disabled={sweepAllMut.isPending}
+                  className="bg-primary hover:bg-primary/90 text-primary-foreground font-bold text-xs"
+                >
+                  {sweepAllMut.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> : <ArrowDownCircle className="h-3.5 w-3.5 mr-1" />}
+                  Tümünü Topla (Sweep)
+                </Button>
+              </div>
+            </div>
+
+            <div className="grid md:grid-cols-2 gap-4">
+              {/* Hot Wallet Balances */}
+              <div className="bg-card border border-primary/30 rounded-lg p-4">
+                <h3 className="text-sm font-bold text-primary mb-3">Hot Wallet (Platform Kasası)</h3>
+                {hotWalletQuery.isLoading ? (
+                  <div className="p-4 text-center"><Loader2 className="h-4 w-4 animate-spin text-primary mx-auto" /></div>
+                ) : !hotWalletQuery.data?.length ? (
+                  <p className="text-xs text-muted-foreground">Hot wallet adresleri ayarlanmamış (.env)</p>
+                ) : (
+                  <div className="space-y-2">
+                    {hotWalletQuery.data.map((hw: any) => (
+                      <div key={hw.network} className="flex items-center justify-between bg-secondary/50 rounded-md px-3 py-2">
+                        <div>
+                          <span className="text-xs font-bold text-foreground uppercase">{hw.network}</span>
+                          <div className="text-[10px] font-mono text-muted-foreground">{hw.address.slice(0, 10)}...{hw.address.slice(-6)}</div>
+                        </div>
+                        <div className="text-right">
+                          <div className="text-sm font-bold text-primary">{hw.balance.toFixed(2)} USDT</div>
+                          {hw.nativeBalance !== undefined && (
+                            <div className="text-[10px] text-muted-foreground">{hw.nativeBalance.toFixed(6)} native</div>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Deposit Wallet Balances (aggregated by network) */}
+              <div className="bg-card border border-border rounded-lg p-4">
+                <h3 className="text-sm font-bold text-foreground mb-3">Deposit Adresleri (Kullanıcı)</h3>
+                {depositWalletsQuery.isLoading ? (
+                  <div className="p-4 text-center"><Loader2 className="h-4 w-4 animate-spin text-primary mx-auto" /></div>
+                ) : !depositWalletsQuery.data?.length ? (
+                  <p className="text-xs text-muted-foreground">Henüz deposit adresi yok</p>
+                ) : (() => {
+                  const byNetwork: Record<string, { count: number; totalBalance: number; totalNative: number }> = {};
+                  for (const w of depositWalletsQuery.data as any[]) {
+                    if (!byNetwork[w.network]) byNetwork[w.network] = { count: 0, totalBalance: 0, totalNative: 0 };
+                    byNetwork[w.network].count++;
+                    byNetwork[w.network].totalBalance += w.balance;
+                    if (w.nativeBalance) byNetwork[w.network].totalNative += w.nativeBalance;
+                  }
+                  return (
+                    <div className="space-y-2">
+                      {Object.entries(byNetwork).map(([network, info]) => (
+                        <div key={network} className="flex items-center justify-between bg-secondary/50 rounded-md px-3 py-2">
+                          <div>
+                            <span className="text-xs font-bold text-foreground uppercase">{network}</span>
+                            <div className="text-[10px] text-muted-foreground">{info.count} adres</div>
+                          </div>
+                          <div className="text-right">
+                            <div className="text-sm font-bold text-foreground">{info.totalBalance.toFixed(2)} USDT</div>
+                            {info.totalNative > 0 && (
+                              <div className="text-[10px] text-muted-foreground">{info.totalNative.toFixed(6)} native</div>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                      <div className="border-t border-border pt-2 mt-2 flex items-center justify-between px-3">
+                        <span className="text-xs font-bold text-muted-foreground">TOPLAM</span>
+                        <span className="text-sm font-bold text-primary">
+                          {(depositWalletsQuery.data as any[]).reduce((sum: number, w: any) => sum + w.balance, 0).toFixed(2)} USDT
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })()}
+              </div>
+            </div>
+
+            {/* Sweep Results */}
+            {sweepAllMut.data && (
+              <div className="mt-3 bg-card border border-border rounded-lg p-4">
+                <h4 className="text-sm font-bold text-foreground mb-2">Son Sweep Sonuçları</h4>
+                <div className="space-y-1">
+                  {sweepAllMut.data.results.map((r: any, i: number) => (
+                    <div key={i} className="flex items-center justify-between text-xs px-2 py-1 rounded bg-secondary/30">
+                      <span className="font-mono text-muted-foreground">{r.address.slice(0, 12)}...</span>
+                      <span className="text-foreground">{r.amount.toFixed(2)} USDT ({r.network})</span>
+                      {r.txHash ? (
+                        <span className="text-primary font-mono">{r.txHash.slice(0, 10)}...</span>
+                      ) : (
+                        <span className="text-destructive">{r.error}</span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Pending Withdrawals */}
+          <div>
+            <h2 className="text-lg font-bold text-foreground mb-3 flex items-center gap-2">
+              <Clock className="h-5 w-5 text-yellow-500" />
+              Bekleyen Çekimler
+              {(pendingWithdrawalsQuery.data?.length || 0) > 0 && (
+                <span className="bg-yellow-500 text-black text-xs font-bold px-2 py-0.5 rounded-full">
+                  {pendingWithdrawalsQuery.data?.length}
+                </span>
+              )}
+            </h2>
+            {pendingWithdrawalsQuery.isLoading ? (
+              <div className="p-6 text-center"><Loader2 className="h-5 w-5 animate-spin text-primary mx-auto" /></div>
+            ) : !pendingWithdrawalsQuery.data?.length ? (
+              <div className="bg-card border border-border rounded-lg p-6 text-center text-muted-foreground text-sm">
+                Bekleyen çekim yok
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {pendingWithdrawalsQuery.data.map((w: any) => (
+                  <div key={w.id} className="bg-card border border-yellow-500/30 rounded-lg p-4 flex items-center justify-between">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-3 mb-1">
+                        <span className="text-sm font-bold text-foreground">{w.amount} USDT</span>
+                        <span className="text-xs px-1.5 py-0.5 rounded bg-secondary text-muted-foreground">{w.network.toUpperCase()}</span>
+                        <span className="text-xs text-muted-foreground">Fee: {w.fee} USDT</span>
+                      </div>
+                      <div className="text-xs text-muted-foreground">
+                        User #{w.userId} → <code className="font-mono">{w.toAddress.slice(0, 16)}...{w.toAddress.slice(-8)}</code>
+                      </div>
+                      <div className="text-[10px] text-muted-foreground mt-0.5">
+                        {format(new Date(w.createdAt), "dd.MM.yy HH:mm")}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 ml-4">
+                      <Button
+                        size="sm"
+                        onClick={() => approveMut.mutate({ id: w.id })}
+                        disabled={approveMut.isPending || rejectMut.isPending}
+                        className="bg-primary hover:bg-primary/90 text-primary-foreground font-bold text-xs"
+                      >
+                        <CheckCircle2 className="h-3.5 w-3.5 mr-1" /> Onayla
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => {
+                          const note = prompt("Red sebebi (opsiyonel):");
+                          rejectMut.mutate({ id: w.id, note: note || undefined });
+                        }}
+                        disabled={approveMut.isPending || rejectMut.isPending}
+                        className="text-destructive border-destructive/30 hover:bg-destructive/10 font-bold text-xs"
+                      >
+                        <XCircle className="h-3.5 w-3.5 mr-1" /> Reddet
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* All Deposits */}
+          <div>
+            <h2 className="text-lg font-bold text-foreground mb-3 flex items-center gap-2">
+              <ArrowDownCircle className="h-5 w-5 text-primary" />
+              Kripto Yatırmalar
+            </h2>
+            <div className="bg-card border border-border rounded-lg overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-border bg-secondary/50">
+                      <th className="text-left px-4 py-2.5 text-xs text-muted-foreground font-medium">ID</th>
+                      <th className="text-left px-4 py-2.5 text-xs text-muted-foreground font-medium">User</th>
+                      <th className="text-left px-4 py-2.5 text-xs text-muted-foreground font-medium">Ağ</th>
+                      <th className="text-left px-4 py-2.5 text-xs text-muted-foreground font-medium">Tutar</th>
+                      <th className="text-left px-4 py-2.5 text-xs text-muted-foreground font-medium">TX Hash</th>
+                      <th className="text-left px-4 py-2.5 text-xs text-muted-foreground font-medium">Onay</th>
+                      <th className="text-left px-4 py-2.5 text-xs text-muted-foreground font-medium">Durum</th>
+                      <th className="text-left px-4 py-2.5 text-xs text-muted-foreground font-medium">Tarih</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {cryptoDepositsQuery.isLoading ? (
+                      <tr><td colSpan={8} className="p-6 text-center"><Loader2 className="h-5 w-5 animate-spin text-primary mx-auto" /></td></tr>
+                    ) : !cryptoDepositsQuery.data?.length ? (
+                      <tr><td colSpan={8} className="p-6 text-center text-muted-foreground text-sm">Henüz kripto yatırma yok</td></tr>
+                    ) : (
+                      cryptoDepositsQuery.data.map((d: any) => (
+                        <tr key={d.id} className="border-b border-border/30 hover:bg-accent/20 transition-colors">
+                          <td className="px-4 py-2.5 text-foreground">{d.id}</td>
+                          <td className="px-4 py-2.5 text-xs text-muted-foreground">#{d.userId}</td>
+                          <td className="px-4 py-2.5"><span className="text-xs px-1.5 py-0.5 rounded bg-secondary text-foreground">{d.network.toUpperCase()}</span></td>
+                          <td className="px-4 py-2.5 text-primary font-semibold">{d.amount} {d.tokenSymbol}</td>
+                          <td className="px-4 py-2.5 text-xs font-mono text-muted-foreground">{d.txHash.slice(0, 12)}...</td>
+                          <td className="px-4 py-2.5 text-xs">{d.confirmations}/{d.requiredConfirmations}</td>
+                          <td className="px-4 py-2.5">
+                            <span className={`text-xs px-1.5 py-0.5 rounded ${
+                              d.status === "credited" ? "text-primary bg-primary/10" :
+                              d.status === "confirmed" ? "text-green-400 bg-green-400/10" :
+                              d.status === "failed" ? "text-destructive bg-destructive/10" :
+                              "text-yellow-500 bg-yellow-500/10"
+                            }`}>{d.status}</span>
+                          </td>
+                          <td className="px-4 py-2.5 text-xs text-muted-foreground">{format(new Date(d.createdAt), "dd.MM.yy HH:mm")}</td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          {/* All Withdrawals */}
+          <div>
+            <h2 className="text-lg font-bold text-foreground mb-3 flex items-center gap-2">
+              <ArrowUpCircle className="h-5 w-5 text-destructive" />
+              Tüm Çekimler
+            </h2>
+            <div className="bg-card border border-border rounded-lg overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-border bg-secondary/50">
+                      <th className="text-left px-4 py-2.5 text-xs text-muted-foreground font-medium">ID</th>
+                      <th className="text-left px-4 py-2.5 text-xs text-muted-foreground font-medium">User</th>
+                      <th className="text-left px-4 py-2.5 text-xs text-muted-foreground font-medium">Ağ</th>
+                      <th className="text-left px-4 py-2.5 text-xs text-muted-foreground font-medium">Tutar</th>
+                      <th className="text-left px-4 py-2.5 text-xs text-muted-foreground font-medium">Fee</th>
+                      <th className="text-left px-4 py-2.5 text-xs text-muted-foreground font-medium">Adres</th>
+                      <th className="text-left px-4 py-2.5 text-xs text-muted-foreground font-medium">Durum</th>
+                      <th className="text-left px-4 py-2.5 text-xs text-muted-foreground font-medium">Tarih</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {allWithdrawalsQuery.isLoading ? (
+                      <tr><td colSpan={8} className="p-6 text-center"><Loader2 className="h-5 w-5 animate-spin text-primary mx-auto" /></td></tr>
+                    ) : !allWithdrawalsQuery.data?.length ? (
+                      <tr><td colSpan={8} className="p-6 text-center text-muted-foreground text-sm">Henüz çekim yok</td></tr>
+                    ) : (
+                      allWithdrawalsQuery.data.map((w: any) => (
+                        <tr key={w.id} className="border-b border-border/30 hover:bg-accent/20 transition-colors">
+                          <td className="px-4 py-2.5 text-foreground">{w.id}</td>
+                          <td className="px-4 py-2.5 text-xs text-muted-foreground">#{w.userId}</td>
+                          <td className="px-4 py-2.5"><span className="text-xs px-1.5 py-0.5 rounded bg-secondary text-foreground">{w.network.toUpperCase()}</span></td>
+                          <td className="px-4 py-2.5 text-destructive font-semibold">{w.amount} USDT</td>
+                          <td className="px-4 py-2.5 text-xs text-muted-foreground">{w.fee}</td>
+                          <td className="px-4 py-2.5 text-xs font-mono text-muted-foreground">{w.toAddress.slice(0, 12)}...</td>
+                          <td className="px-4 py-2.5">
+                            <span className={`text-xs px-1.5 py-0.5 rounded ${
+                              w.status === "completed" ? "text-primary bg-primary/10" :
+                              w.status === "approved" || w.status === "processing" ? "text-blue-400 bg-blue-400/10" :
+                              w.status === "rejected" || w.status === "failed" ? "text-destructive bg-destructive/10" :
+                              "text-yellow-500 bg-yellow-500/10"
+                            }`}>{w.status}</span>
+                          </td>
+                          <td className="px-4 py-2.5 text-xs text-muted-foreground">{format(new Date(w.createdAt), "dd.MM.yy HH:mm")}</td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
           </div>
         </div>
       )}

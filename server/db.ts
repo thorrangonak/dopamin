@@ -1,6 +1,6 @@
 import { eq, desc, and, sql, inArray, asc, lte, gte, isNull, or } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
-import { InsertUser, users, balances, transactions, bets, betItems, sportsCache, eventsCache, casinoGames, vipProfiles, banners, type InsertBanner, chatMessages } from "../drizzle/schema";
+import { InsertUser, users, balances, transactions, bets, betItems, sportsCache, eventsCache, casinoGames, vipProfiles, banners, type InsertBanner, chatMessages, wallets, cryptoDeposits, cryptoWithdrawals } from "../drizzle/schema";
 import { ENV } from './_core/env';
 
 let _db: ReturnType<typeof drizzle> | null = null;
@@ -521,4 +521,272 @@ export async function clearChatHistory(userId: number) {
   const db = await getDb();
   if (!db) return;
   await db.delete(chatMessages).where(eq(chatMessages.userId, userId));
+}
+
+// ─── Crypto Wallet Helpers ───
+
+export async function createWallet(userId: number, network: string, addressIndex: number, depositAddress: string) {
+  const db = await getDb();
+  if (!db) return null;
+  const [inserted] = await db.insert(wallets).values({
+    userId,
+    network: network as any,
+    addressIndex,
+    depositAddress,
+  }).$returningId();
+  return inserted.id;
+}
+
+export async function getUserWallet(userId: number, network: string) {
+  const db = await getDb();
+  if (!db) return null;
+  const result = await db.select().from(wallets)
+    .where(and(eq(wallets.userId, userId), eq(wallets.network, network as any)))
+    .limit(1);
+  return result.length > 0 ? result[0] : null;
+}
+
+export async function getUserWallets(userId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(wallets).where(eq(wallets.userId, userId));
+}
+
+export async function getNextAddressIndex(): Promise<number> {
+  const db = await getDb();
+  if (!db) return 1;
+  const result = await db.select({ maxIdx: sql`MAX(${wallets.addressIndex})` }).from(wallets);
+  const max = result[0]?.maxIdx;
+  return (typeof max === "number" ? max : 0) + 1;
+}
+
+export async function getActiveDepositAddresses(network: string) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(wallets).where(eq(wallets.network, network as any));
+}
+
+// ─── Crypto Deposit Helpers ───
+
+export async function createCryptoDeposit(data: {
+  userId: number;
+  walletId: number;
+  network: string;
+  txHash: string;
+  fromAddress: string;
+  amount: string;
+  tokenSymbol: string;
+  requiredConfirmations: number;
+}) {
+  const db = await getDb();
+  if (!db) return null;
+  // Idempotent: skip if txHash already exists
+  const existing = await db.select().from(cryptoDeposits)
+    .where(eq(cryptoDeposits.txHash, data.txHash)).limit(1);
+  if (existing.length > 0) return existing[0].id;
+
+  const [inserted] = await db.insert(cryptoDeposits).values({
+    userId: data.userId,
+    walletId: data.walletId,
+    network: data.network as any,
+    txHash: data.txHash,
+    fromAddress: data.fromAddress,
+    amount: data.amount,
+    tokenSymbol: data.tokenSymbol,
+    requiredConfirmations: data.requiredConfirmations,
+  }).$returningId();
+  return inserted.id;
+}
+
+export async function updateDepositStatus(id: number, status: string, confirmations: number) {
+  const db = await getDb();
+  if (!db) return;
+  await db.update(cryptoDeposits).set({
+    status: status as any,
+    confirmations,
+  }).where(eq(cryptoDeposits.id, id));
+}
+
+export async function creditDeposit(depositId: number) {
+  const db = await getDb();
+  if (!db) return;
+
+  // Atomic transaction with row lock to prevent double-credit
+  await db.transaction(async (tx) => {
+    // Lock the deposit row — prevents concurrent credit
+    const deposit = await tx.select().from(cryptoDeposits)
+      .where(eq(cryptoDeposits.id, depositId))
+      .for("update")
+      .limit(1);
+    if (!deposit.length || deposit[0].status !== "confirmed") return;
+
+    const dep = deposit[0];
+    const usdtAmount = dep.amount;
+
+    // Lock balance row too
+    await tx.select().from(balances)
+      .where(eq(balances.userId, dep.userId))
+      .for("update");
+
+    // Credit balance
+    await tx.update(balances).set({ amount: sql`amount + ${usdtAmount}` })
+      .where(eq(balances.userId, dep.userId));
+    await tx.insert(transactions).values({
+      userId: dep.userId, type: "deposit", amount: usdtAmount,
+      description: `Kripto yatırma: ${dep.tokenSymbol} (${dep.network})`,
+    });
+
+    // Mark as credited — inside same transaction
+    await tx.update(cryptoDeposits).set({
+      status: "credited" as any,
+      creditedAt: new Date(),
+    }).where(eq(cryptoDeposits.id, depositId));
+  });
+}
+
+export async function getPendingDeposits() {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(cryptoDeposits)
+    .where(
+      or(
+        eq(cryptoDeposits.status, "pending"),
+        eq(cryptoDeposits.status, "confirming"),
+      ) as any
+    );
+}
+
+export async function getUserCryptoDeposits(userId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(cryptoDeposits)
+    .where(eq(cryptoDeposits.userId, userId))
+    .orderBy(desc(cryptoDeposits.createdAt));
+}
+
+export async function getAllCryptoDeposits(limit = 100) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(cryptoDeposits)
+    .orderBy(desc(cryptoDeposits.createdAt))
+    .limit(limit);
+}
+
+// ─── Crypto Withdrawal Helpers ───
+
+export async function createWithdrawal(data: {
+  userId: number;
+  network: string;
+  toAddress: string;
+  amount: string;
+  fee: string;
+  tokenSymbol: string;
+}) {
+  const db = await getDb();
+  if (!db) return null;
+  const [inserted] = await db.insert(cryptoWithdrawals).values({
+    userId: data.userId,
+    network: data.network as any,
+    toAddress: data.toAddress,
+    amount: data.amount,
+    fee: data.fee,
+    tokenSymbol: data.tokenSymbol,
+  }).$returningId();
+  return inserted.id;
+}
+
+export async function updateWithdrawalStatus(id: number, status: string, txHash?: string, reviewedBy?: number, adminNote?: string) {
+  const db = await getDb();
+  if (!db) return;
+  const updateData: any = { status };
+  if (txHash) updateData.txHash = txHash;
+  if (reviewedBy) updateData.reviewedBy = reviewedBy;
+  if (adminNote !== undefined) updateData.adminNote = adminNote;
+  if (status === "completed" || status === "rejected" || status === "failed") {
+    updateData.processedAt = new Date();
+  }
+  await db.update(cryptoWithdrawals).set(updateData).where(eq(cryptoWithdrawals.id, id));
+}
+
+export async function getWithdrawalById(id: number) {
+  const db = await getDb();
+  if (!db) return null;
+  const result = await db.select().from(cryptoWithdrawals)
+    .where(eq(cryptoWithdrawals.id, id)).limit(1);
+  return result.length > 0 ? result[0] : null;
+}
+
+export async function getPendingWithdrawals() {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(cryptoWithdrawals)
+    .where(eq(cryptoWithdrawals.status, "pending"))
+    .orderBy(desc(cryptoWithdrawals.createdAt));
+}
+
+export async function getUserWithdrawals(userId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(cryptoWithdrawals)
+    .where(eq(cryptoWithdrawals.userId, userId))
+    .orderBy(desc(cryptoWithdrawals.createdAt));
+}
+
+// Atomic balance deduction with row lock — prevents race condition on withdrawals
+export async function atomicDeductBalance(
+  userId: number,
+  totalCost: number,
+  description: string
+): Promise<{ success: boolean; error?: string }> {
+  const db = await getDb();
+  if (!db) return { success: false, error: "DB unavailable" };
+
+  try {
+    await db.transaction(async (tx) => {
+      // Lock the balance row
+      const bal = await tx.select().from(balances)
+        .where(eq(balances.userId, userId))
+        .for("update")
+        .limit(1);
+
+      if (!bal.length || parseFloat(bal[0].amount) < totalCost) {
+        throw new Error("Yetersiz bakiye");
+      }
+
+      // Deduct inside the lock
+      await tx.update(balances)
+        .set({ amount: sql`amount - ${totalCost.toFixed(2)}` })
+        .where(eq(balances.userId, userId));
+
+      await tx.insert(transactions).values({
+        userId, type: "withdraw", amount: totalCost.toFixed(2), description,
+      });
+    });
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err.message || "Transaction failed" };
+  }
+}
+
+export async function getUserDailyWithdrawalTotal(userId: number): Promise<number> {
+  const db = await getDb();
+  if (!db) return 0;
+  const result = await db.select({ total: sql<string>`COALESCE(SUM(amount), 0)` })
+    .from(cryptoWithdrawals)
+    .where(and(
+      eq(cryptoWithdrawals.userId, userId),
+      gte(cryptoWithdrawals.createdAt, sql`DATE_SUB(NOW(), INTERVAL 24 HOUR)`),
+      // Count all non-rejected withdrawals
+      sql`${cryptoWithdrawals.status} != 'rejected'`,
+      sql`${cryptoWithdrawals.status} != 'failed'`,
+    ));
+  return parseFloat(result[0]?.total || "0");
+}
+
+export async function getAllWithdrawals(limit = 100) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(cryptoWithdrawals)
+    .orderBy(desc(cryptoWithdrawals.createdAt))
+    .limit(limit);
 }

@@ -19,7 +19,17 @@ import {
   getActiveBanners, getAllBanners, getBannerById, createBanner, updateBanner, deleteBanner, reorderBanners,
   upsertUser, getUserByEmail, getOrCreateBalance as ensureBalance,
   getChatHistory, addChatMessage, clearChatHistory,
+  // Crypto wallet
+  createWallet, getUserWallet, getUserWallets, getNextAddressIndex,
+  createCryptoDeposit, getUserCryptoDeposits, getAllCryptoDeposits,
+  createWithdrawal, updateWithdrawalStatus, getWithdrawalById,
+  getPendingWithdrawals, getUserWithdrawals, getAllWithdrawals,
+  getUserDailyWithdrawalTotal,
+  atomicDeductBalance,
 } from "./db";
+import { generateAddress } from "./lib/wallet/hdDerivation";
+import { NETWORKS, NETWORK_IDS, type NetworkId, getAutoApproveLimit, WITHDRAWAL_LIMITS } from "./lib/wallet/index";
+import { getAllDepositBalances, getHotWalletBalances, sweepAll } from "./lib/wallet/hotWallet";
 import { settleBets } from "./settlement";
 import { calculateCasinoResult } from "./casinoEngine";
 import { invokeLLM } from "./_core/llm";
@@ -691,6 +701,128 @@ export const appRouter = router({
     }),
   }),
 
+  // ─── Crypto Wallet ───
+  cryptoWallet: router({
+    getDepositAddress: protectedProcedure
+      .input(z.object({ network: z.enum(["tron", "ethereum", "bsc", "polygon", "solana", "bitcoin"]) }))
+      .mutation(async ({ ctx, input }) => {
+        const network = input.network as NetworkId;
+
+        // Check if user already has an address for this network
+        const existing = await getUserWallet(ctx.user.id, network);
+        if (existing) {
+          return {
+            address: existing.depositAddress,
+            network: existing.network,
+            isNew: false,
+          };
+        }
+
+        // Generate new address via HD derivation
+        const addressIndex = await getNextAddressIndex();
+        const { address } = await generateAddress(network, addressIndex);
+
+        await createWallet(ctx.user.id, network, addressIndex, address);
+
+        return { address, network, isNew: true };
+      }),
+
+    getAddresses: protectedProcedure.query(async ({ ctx }) => {
+      return getUserWallets(ctx.user.id);
+    }),
+
+    deposits: protectedProcedure.query(async ({ ctx }) => {
+      return getUserCryptoDeposits(ctx.user.id);
+    }),
+
+    withdrawals: protectedProcedure.query(async ({ ctx }) => {
+      return getUserWithdrawals(ctx.user.id);
+    }),
+
+    requestWithdrawal: protectedProcedure
+      .input(z.object({
+        network: z.enum(["tron", "ethereum", "bsc", "polygon", "solana", "bitcoin"]),
+        toAddress: z.string().min(10).max(128),
+        amount: z.number().min(1).max(WITHDRAWAL_LIMITS.perTransaction),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        const network = input.network as NetworkId;
+        const config = NETWORKS[network];
+
+        // Per-transaction limit
+        if (input.amount > WITHDRAWAL_LIMITS.perTransaction) {
+          throw new Error(`Tek seferde maksimum ${WITHDRAWAL_LIMITS.perTransaction} USDT çekilebilir`);
+        }
+
+        // Daily limit check
+        const dailyTotal = await getUserDailyWithdrawalTotal(ctx.user.id);
+        if (dailyTotal + input.amount > WITHDRAWAL_LIMITS.dailyTotal) {
+          const remaining = Math.max(0, WITHDRAWAL_LIMITS.dailyTotal - dailyTotal);
+          throw new Error(`Günlük çekim limiti: ${WITHDRAWAL_LIMITS.dailyTotal} USDT. Kalan: ${remaining.toFixed(2)} USDT`);
+        }
+
+        // Address format validation
+        const addrValidators: Record<string, RegExp> = {
+          tron: /^T[A-HJ-NP-Za-km-z1-9]{33}$/,
+          ethereum: /^0x[a-fA-F0-9]{40}$/,
+          bsc: /^0x[a-fA-F0-9]{40}$/,
+          polygon: /^0x[a-fA-F0-9]{40}$/,
+          solana: /^[1-9A-HJ-NP-Za-km-z]{32,44}$/,
+          bitcoin: /^(bc1|tb1|[13]|[mn2])[a-zA-HJ-NP-Z0-9]{25,62}$/,
+        };
+        if (addrValidators[network] && !addrValidators[network].test(input.toAddress)) {
+          throw new Error(`Geçersiz ${config.name} adresi`);
+        }
+
+        // Atomic balance check + deduct (prevents race condition)
+        const totalCost = input.amount + config.withdrawalFee;
+        await getOrCreateBalance(ctx.user.id);
+        const deduct = await atomicDeductBalance(
+          ctx.user.id,
+          totalCost,
+          `Kripto çekim talebi: ${input.amount} USDT (${config.name}) + ${config.withdrawalFee} fee`
+        );
+        if (!deduct.success) {
+          throw new Error(deduct.error || "Yetersiz bakiye");
+        }
+
+        // Create withdrawal record
+        const withdrawalId = await createWithdrawal({
+          userId: ctx.user.id,
+          network,
+          toAddress: input.toAddress,
+          amount: input.amount.toFixed(2),
+          fee: config.withdrawalFee.toFixed(2),
+          tokenSymbol: "USDT",
+        });
+
+        // Auto-approve if under limit
+        const autoLimit = getAutoApproveLimit();
+        if (input.amount <= autoLimit) {
+          await updateWithdrawalStatus(withdrawalId!, "approved");
+        }
+
+        return { withdrawalId, status: input.amount <= autoLimit ? "approved" : "pending" };
+      }),
+
+    networks: publicProcedure.query(() => {
+      return Object.values(NETWORKS).map(n => ({
+        id: n.id,
+        name: n.name,
+        symbol: n.symbol,
+        token: n.token,
+        minDeposit: n.minDeposit,
+        withdrawalFee: n.withdrawalFee,
+        confirmations: n.confirmations,
+        icon: n.icon,
+        color: n.color,
+        bg: n.bg,
+        recommended: n.recommended || false,
+        explorerUrl: n.explorerUrl,
+      }));
+    }),
+  }),
+
   // ─── Admin ───
   admin: router({
     users: adminProcedure.query(async () => {
@@ -775,6 +907,54 @@ export const appRouter = router({
       .input(z.object({ orderedIds: z.array(z.number()).min(1) }))
       .mutation(async ({ input }) => {
         await reorderBanners(input.orderedIds);
+        return { success: true };
+      }),
+
+    // ─── Crypto Admin ───
+    cryptoDeposits: adminProcedure.query(async () => {
+      return getAllCryptoDeposits();
+    }),
+    cryptoWithdrawals: adminProcedure.query(async () => {
+      return getAllWithdrawals();
+    }),
+    pendingWithdrawals: adminProcedure.query(async () => {
+      return getPendingWithdrawals();
+    }),
+    approveWithdrawal: adminProcedure
+      .input(z.object({ id: z.number() }))
+      .mutation(async ({ ctx, input }) => {
+        const withdrawal = await getWithdrawalById(input.id);
+        if (!withdrawal) throw new Error("Çekim bulunamadı");
+        if (withdrawal.status !== "pending") throw new Error("Bu çekim zaten işlendi");
+        await updateWithdrawalStatus(input.id, "approved", undefined, ctx.user.id);
+        return { success: true };
+      }),
+    // ─── Hot Wallet & Sweep ───
+    hotWalletBalances: adminProcedure.query(async () => {
+      return getHotWalletBalances();
+    }),
+    depositWalletBalances: adminProcedure.query(async () => {
+      return getAllDepositBalances();
+    }),
+    sweepAll: adminProcedure.mutation(async () => {
+      return sweepAll();
+    }),
+
+    rejectWithdrawal: adminProcedure
+      .input(z.object({ id: z.number(), note: z.string().optional() }))
+      .mutation(async ({ ctx, input }) => {
+        const withdrawal = await getWithdrawalById(input.id);
+        if (!withdrawal) throw new Error("Çekim bulunamadı");
+        if (withdrawal.status !== "pending") throw new Error("Bu çekim zaten işlendi");
+
+        // Refund the balance
+        const refundAmount = parseFloat(withdrawal.amount) + parseFloat(withdrawal.fee);
+        await getOrCreateBalance(withdrawal.userId);
+        await updateBalance(withdrawal.userId, refundAmount.toFixed(2));
+        await addTransaction(withdrawal.userId, "deposit", refundAmount.toFixed(2),
+          `Çekim reddedildi — iade: ${withdrawal.amount} USDT + ${withdrawal.fee} fee`);
+
+        await updateWithdrawalStatus(input.id, "rejected", undefined, ctx.user.id, input.note);
         return { success: true };
       }),
   }),
