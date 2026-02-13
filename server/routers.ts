@@ -6,6 +6,7 @@ import { sdk } from "./_core/sdk";
 import { hashPassword, verifyPassword } from "./_core/password";
 import { z } from "zod";
 import { fetchSports, fetchOdds, fetchScores } from "./oddsApi";
+import { getDemoSports, getDemoEvents, getDemoLiveEventsClean } from "./demoData";
 import {
   getOrCreateBalance, updateBalance, addTransaction, getUserTransactions,
   createBet, getUserBets, getBetWithItems, getBetItemsByBetId,
@@ -112,20 +113,27 @@ export const appRouter = router({
     list: publicProcedure.query(async () => {
       const cached = await getActiveSports();
       if (cached.length > 0) return cached;
-      const sports = await fetchSports();
-      for (const s of sports) {
-        if (s.active) {
-          await upsertSport({
-            sportKey: s.key,
-            groupName: s.group,
-            title: s.title,
-            description: s.description || "",
-            active: s.active ? 1 : 0,
-            hasOutrights: s.has_outrights ? 1 : 0,
-          });
+      try {
+        const sports = await fetchSports();
+        for (const s of sports) {
+          if (s.active) {
+            await upsertSport({
+              sportKey: s.key,
+              groupName: s.group,
+              title: s.title,
+              description: s.description || "",
+              active: s.active ? 1 : 0,
+              hasOutrights: s.has_outrights ? 1 : 0,
+            });
+          }
         }
+        const result = await getActiveSports();
+        if (result.length > 0) return result;
+      } catch (err: any) {
+        console.error("[Sports] API error, using demo data:", err?.message);
       }
-      return getActiveSports();
+      // Fallback to demo data
+      return getDemoSports();
     }),
     refresh: adminProcedure.mutation(async () => {
       const sports = await fetchSports();
@@ -150,20 +158,25 @@ export const appRouter = router({
       .query(async ({ input }) => {
         try {
           const events = await fetchOdds(input.sportKey);
-          for (const e of events) {
-            await upsertEvent({
-              eventId: e.id,
-              sportKey: e.sport_key,
-              homeTeam: e.home_team,
-              awayTeam: e.away_team,
-              commenceTime: new Date(e.commence_time),
-              oddsJson: e.bookmakers,
-            });
+          if (events.length > 0) {
+            for (const e of events) {
+              await upsertEvent({
+                eventId: e.id,
+                sportKey: e.sport_key,
+                homeTeam: e.home_team,
+                awayTeam: e.away_team,
+                commenceTime: new Date(e.commence_time),
+                oddsJson: e.bookmakers,
+              });
+            }
+            return events;
           }
-          return events;
         } catch (err: any) {
-          console.error("[Events] API error, using cache:", err?.message);
-          const cached = await getEventsBySport(input.sportKey);
+          console.error("[Events] API error, trying cache:", err?.message);
+        }
+        // Try cache
+        const cached = await getEventsBySport(input.sportKey);
+        if (cached.length > 0) {
           return cached.map(c => ({
             id: c.eventId,
             sport_key: c.sportKey,
@@ -174,6 +187,8 @@ export const appRouter = router({
             bookmakers: (c.oddsJson as any) ?? [],
           }));
         }
+        // Fallback to demo data
+        return getDemoEvents(input.sportKey);
       }),
   }),
 
@@ -334,13 +349,21 @@ export const appRouter = router({
   liveScores: router({
     // Get all live/in-progress events
     live: publicProcedure.query(async () => {
-      return getLiveEvents();
+      const events = await getLiveEvents();
+      if (events.length > 0) return events;
+      // Fallback: demo live events
+      return getDemoLiveEventsClean().filter(e => e.isLive === 1);
     }),
     // Get events with scores for a sport (or all)
     bySport: publicProcedure
       .input(z.object({ sportKey: z.string().optional() }).optional())
       .query(async ({ input }) => {
-        return getEventsWithScores(input?.sportKey);
+        const events = await getEventsWithScores(input?.sportKey);
+        if (events.length > 0) return events;
+        // Fallback: demo events with scores
+        const demo = getDemoLiveEventsClean();
+        if (input?.sportKey) return demo.filter(e => e.sportKey === input.sportKey);
+        return demo;
       }),
     // Refresh scores from The Odds API
     refresh: publicProcedure.mutation(async () => {
