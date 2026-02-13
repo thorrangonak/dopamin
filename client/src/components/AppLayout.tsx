@@ -330,6 +330,16 @@ function MobileSidebar({ open, onClose }: { open: boolean; onClose: () => void }
   const { theme, toggleTheme } = useTheme();
   const items = section === "sports" ? SPORT_ITEMS : CASINO_ITEMS;
 
+  // Lock body scroll when sidebar is open
+  useEffect(() => {
+    if (open) {
+      document.body.style.overflow = "hidden";
+    } else {
+      document.body.style.overflow = "";
+    }
+    return () => { document.body.style.overflow = ""; };
+  }, [open]);
+
   // Close sidebar on route change
   useEffect(() => {
     onClose();
