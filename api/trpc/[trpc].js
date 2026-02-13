@@ -1417,7 +1417,7 @@ var normalizeToolChoice = (toolChoice, tools) => {
   }
   return toolChoice;
 };
-var resolveApiUrl = () => ENV.forgeApiUrl && ENV.forgeApiUrl.trim().length > 0 ? `${ENV.forgeApiUrl.replace(/\/$/, "")}/v1/chat/completions` : "https://forge.manus.im/v1/chat/completions";
+var resolveApiUrl = () => ENV.forgeApiUrl && ENV.forgeApiUrl.trim().length > 0 ? `${ENV.forgeApiUrl.replace(/\/$/, "")}/chat/completions` : "https://api.z.ai/api/paas/v4/chat/completions";
 var normalizeResponseFormat = ({
   responseFormat,
   response_format,
@@ -1474,7 +1474,7 @@ async function invokeLLM(params) {
     response_format
   } = params;
   const payload = {
-    model: "gemini-2.5-flash",
+    model: "glm-5",
     messages: messages.map(normalizeMessage)
   };
   if (tools && tools.length > 0) {
@@ -1487,10 +1487,7 @@ async function invokeLLM(params) {
   if (normalizedToolChoice) {
     payload.tool_choice = normalizedToolChoice;
   }
-  payload.max_tokens = 32768;
-  payload.thinking = {
-    "budget_tokens": 128
-  };
+  payload.max_tokens = 4096;
   const normalizedResponseFormat = normalizeResponseFormat({
     responseFormat,
     response_format,
