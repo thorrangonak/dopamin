@@ -2,7 +2,15 @@
   "buildCommand": "pnpm install && vite build",
   "outputDirectory": "dist/public",
   "framework": null,
+  "functions": {
+    "api/**/*.ts": {
+      "runtime": "@vercel/node@3",
+      "maxDuration": 30
+    }
+  },
   "rewrites": [
-    { "source": "/(.*)", "destination": "/index.html" }
+    { "source": "/api/trpc/:path*", "destination": "/api/trpc/[trpc]" },
+    { "source": "/api/oauth/callback", "destination": "/api/oauth/callback" },
+    { "source": "/((?!api/).*)", "destination": "/index.html" }
   ]
 }
