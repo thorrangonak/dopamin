@@ -5,6 +5,7 @@
 # Build outputs
 dist/
 build/
+api/
 *.dist
 
 # Environment variables
@@ -113,3 +114,5 @@ temp/
 .manus/
 client/public/__manus__/
 banner_analysis.md
+.vercel
+.env*.local
