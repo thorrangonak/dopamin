@@ -2308,6 +2308,35 @@ var appRouter = router({
   }),
   // ─── Events & Odds ───
   events: router({
+    featured: publicProcedure.query(async () => {
+      const popularKeys = [
+        "soccer_turkey_super_league",
+        "soccer_epl",
+        "soccer_spain_la_liga",
+        "soccer_uefa_champs_league",
+        "basketball_nba",
+        "basketball_euroleague"
+      ];
+      const all = [];
+      for (const sportKey of popularKeys) {
+        const cached = await getEventsBySport(sportKey);
+        if (cached.length > 0) {
+          all.push(...cached.map((c) => ({
+            id: c.eventId,
+            sport_key: c.sportKey,
+            sport_title: "",
+            commence_time: c.commenceTime.toISOString(),
+            home_team: c.homeTeam,
+            away_team: c.awayTeam,
+            bookmakers: c.oddsJson ?? []
+          })));
+        } else {
+          all.push(...getDemoEvents(sportKey));
+        }
+      }
+      all.sort((a, b) => new Date(a.commence_time).getTime() - new Date(b.commence_time).getTime());
+      return all;
+    }),
     bySport: publicProcedure.input(z2.object({ sportKey: z2.string() })).query(async ({ input }) => {
       try {
         const events = await fetchOdds(input.sportKey);
