@@ -1,5 +1,5 @@
 {
-  "buildCommand": "pnpm install && vite build",
+  "buildCommand": "pnpm install --frozen-lockfile && vite build",
   "outputDirectory": "dist/public",
   "framework": null,
   "functions": {
