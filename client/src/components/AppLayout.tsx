@@ -3,7 +3,7 @@ import { Button } from "@/components/ui/button";
 import { getLoginUrl } from "@/const";
 import { trpc } from "@/lib/trpc";
 import { useBetSlip } from "@/contexts/BetSlipContext";
-import { useState, createContext, useContext, useEffect } from "react";
+import { useState, createContext, useContext, useEffect, useMemo } from "react";
 import { useLocation } from "wouter";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -25,33 +25,38 @@ import ChatWidget from "@/components/ChatWidget";
 
 /* ─── Section Context ─── */
 type Section = "sports" | "casino";
-const SectionContext = createContext<{ section: Section; setSection: (s: Section) => void }>({
-  section: "sports",
-  setSection: () => {},
+const SectionContext = createContext<{
+  section: Section; setSection: (s: Section) => void;
+  selectedLeague: string | null; setSelectedLeague: (l: string | null) => void;
+}>({
+  section: "sports", setSection: () => {},
+  selectedLeague: null, setSelectedLeague: () => {},
 });
 export const useSection = () => useContext(SectionContext);
 
 /* ─── Sidebar Items ─── */
-const SPORT_ITEMS = [
+const SPORT_NAV_TOP = [
   { label: "Ana Sayfa", path: "/", icon: Home },
-  { label: "Tüm Sporlar", path: "/sports", icon: Activity },
-  { label: "Canlı", path: "/live", icon: Radio },
-  { type: "divider" as const },
-  { label: "Futbol", path: "/sports?sport=soccer", icon: CircleDot },
-  { label: "Basketbol", path: "/sports?sport=basketball", icon: Volleyball },
-  { label: "Tenis", path: "/sports?sport=tennis", icon: Target },
-  { label: "Amerikan Futbolu", path: "/sports?sport=americanfootball", icon: Swords },
-  { label: "Buz Hokeyi", path: "/sports?sport=icehockey", icon: Trophy },
-  { label: "Beyzbol", path: "/sports?sport=baseball", icon: Dumbbell },
-  { label: "MMA", path: "/sports?sport=mma", icon: Swords },
-  { label: "Boks", path: "/sports?sport=boxing", icon: Dumbbell },
-  { label: "Kriket", path: "/sports?sport=cricket", icon: Bike },
-  { label: "E-Spor", path: "/sports?sport=esports", icon: Gamepad2 },
-  { type: "divider" as const },
+  { label: "Tüm Maçlar", path: "/sports", icon: Activity, league: null as string | null },
+  { label: "Canlı Skorlar", path: "/live", icon: Radio },
+  { label: "Kuponlarım", path: "/my-bets", icon: Ticket },
+] as const;
+
+const SPORT_NAV_BOTTOM = [
   { label: "AI Asistan", path: "/assistant", icon: Bot },
   { label: "VIP Kulüp", path: "/vip", icon: Crown },
   { label: "SSS", path: "/faq", icon: HelpCircle },
 ] as const;
+
+const SPORT_GROUP_ICONS: Record<string, any> = {
+  Soccer: CircleDot,
+  Basketball: Volleyball,
+  Tennis: Target,
+  "American Football": Swords,
+  "Ice Hockey": Trophy,
+  "Mixed Martial Arts": Dumbbell,
+  Esports: Gamepad2,
+};
 
 const CASINO_ITEMS = [
   { label: "Ana Sayfa", path: "/casino", icon: Home },
@@ -282,9 +287,54 @@ function NavLink({ path, label }: { path: string; label: string }) {
 function DesktopSidebar({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => void }) {
   const [location] = useLocation();
   const [, setLocation] = useLocation();
-  const { section } = useSection();
-  const items = section === "sports" ? SPORT_ITEMS : CASINO_ITEMS;
+  const { section, selectedLeague, setSelectedLeague } = useSection();
+  const sportsQuery = trpc.sports.list.useQuery(undefined, { enabled: section === "sports" });
 
+  // Group sports by category
+  const sportGroups = useMemo(() => {
+    if (!sportsQuery.data) return {};
+    const groups: Record<string, typeof sportsQuery.data> = {};
+    for (const s of sportsQuery.data) {
+      if (!groups[s.groupName]) groups[s.groupName] = [];
+      groups[s.groupName].push(s);
+    }
+    return groups;
+  }, [sportsQuery.data]);
+
+  if (section === "casino") {
+    // Casino sidebar - static items
+    const items = CASINO_ITEMS;
+    return (
+      <aside className={`hidden lg:flex flex-col border-r border-border bg-sidebar shrink-0 transition-all duration-200 ${collapsed ? "w-14" : "w-52"}`}>
+        <div className="flex items-center justify-end p-2">
+          <button onClick={onToggle} className="p-1 rounded hover:bg-sidebar-accent text-muted-foreground hover:text-foreground transition-colors">
+            {collapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
+          </button>
+        </div>
+        <nav className="flex-1 overflow-y-auto px-2 pb-4 space-y-0.5">
+          {items.map((item, i) => {
+            if ("type" in item && item.type === "divider") {
+              return <div key={`div-${i}`} className="my-2 border-t border-sidebar-border" />;
+            }
+            const navItem = item as { label: string; path: string; icon: any };
+            const Icon = navItem.icon;
+            const isActive = location === navItem.path || (navItem.path !== "/" && location.startsWith(navItem.path));
+            return (
+              <button key={navItem.path} onClick={() => setLocation(navItem.path)}
+                className={`w-full flex items-center gap-3 px-2.5 py-2 rounded-md text-sm transition-all duration-200 ${isActive ? "bg-primary/15 text-primary font-medium" : "text-muted-foreground hover:text-foreground hover:bg-sidebar-accent/50"}`}
+                title={collapsed ? navItem.label : undefined}
+              >
+                <Icon className={`h-4 w-4 shrink-0 ${isActive ? "text-primary" : ""}`} />
+                {!collapsed && <span className="truncate">{navItem.label}</span>}
+              </button>
+            );
+          })}
+        </nav>
+      </aside>
+    );
+  }
+
+  // Sports sidebar - dynamic leagues
   return (
     <aside className={`hidden lg:flex flex-col border-r border-border bg-sidebar shrink-0 transition-all duration-200 ${collapsed ? "w-14" : "w-52"}`}>
       <div className="flex items-center justify-end p-2">
@@ -292,30 +342,72 @@ function DesktopSidebar({ collapsed, onToggle }: { collapsed: boolean; onToggle:
           {collapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
         </button>
       </div>
-
-      <nav className="flex-1 overflow-y-auto px-2 pb-4 space-y-0.5">
-        {items.map((item, i) => {
-          if ("type" in item && item.type === "divider") {
-            return <div key={`div-${i}`} className="my-2 border-t border-sidebar-border" />;
-          }
-          const navItem = item as { label: string; path: string; icon: any };
-          const Icon = navItem.icon;
-          const isActive = location === navItem.path || (navItem.path !== "/" && location.startsWith(navItem.path));
-
+      <nav className="flex-1 overflow-y-auto px-2 pb-4">
+        {/* Top nav */}
+        {SPORT_NAV_TOP.map((item) => {
+          const Icon = item.icon;
+          const isActive = item.path === "/" ? location === "/" : location.startsWith(item.path);
+          const isLeagueItem = "league" in item;
+          const isLeagueActive = isLeagueItem && location === "/sports" && selectedLeague === null;
           return (
-            <button
-              key={navItem.path}
-              onClick={() => setLocation(navItem.path)}
+            <button key={item.path} onClick={() => {
+              if (isLeagueItem) { setSelectedLeague(null); }
+              setLocation(item.path);
+            }}
               className={`w-full flex items-center gap-3 px-2.5 py-2 rounded-md text-sm transition-all duration-200 ${
-                isActive ? "bg-primary/15 text-primary font-medium" : "text-muted-foreground hover:text-foreground hover:bg-sidebar-accent/50"
+                (isLeagueActive || (!isLeagueItem && isActive)) ? "bg-primary/15 text-primary font-medium" : "text-muted-foreground hover:text-foreground hover:bg-sidebar-accent/50"
               }`}
-              title={collapsed ? navItem.label : undefined}
+              title={collapsed ? item.label : undefined}
             >
-              <Icon className={`h-4 w-4 shrink-0 ${isActive ? "text-primary" : ""}`} />
-              {!collapsed && <span className="truncate">{navItem.label}</span>}
+              <Icon className={`h-4 w-4 shrink-0 ${(isLeagueActive || (!isLeagueItem && isActive)) ? "text-primary" : ""}`} />
+              {!collapsed && <span className="truncate">{item.label}</span>}
             </button>
           );
         })}
+
+        {/* Dynamic leagues by group */}
+        {!collapsed && Object.entries(sportGroups).map(([group, sports]) => (
+          <div key={group} className="mt-3">
+            <div className="text-[10px] text-muted-foreground uppercase tracking-wider px-2.5 mb-1 font-semibold">
+              {group}
+            </div>
+            {(sports ?? []).map((s) => {
+              const isActive = location === "/sports" && selectedLeague === s.sportKey;
+              const GroupIcon = SPORT_GROUP_ICONS[group] || Activity;
+              return (
+                <button key={s.sportKey} onClick={() => { setSelectedLeague(s.sportKey); setLocation("/sports"); }}
+                  className={`w-full flex items-center gap-3 px-2.5 py-1.5 rounded-md text-[13px] transition-all duration-200 ${
+                    isActive ? "bg-primary/15 text-primary font-medium" : "text-muted-foreground hover:text-foreground hover:bg-sidebar-accent/50"
+                  }`}
+                >
+                  {collapsed ? <GroupIcon className="h-4 w-4 shrink-0" /> : (
+                    <>
+                      <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${isActive ? "bg-primary" : "bg-muted-foreground/30"}`} />
+                      <span className="truncate">{s.title}</span>
+                    </>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        ))}
+
+        {/* Bottom nav */}
+        <div className="mt-3 pt-3 border-t border-sidebar-border space-y-0.5">
+          {SPORT_NAV_BOTTOM.map((item) => {
+            const Icon = item.icon;
+            const isActive = location === item.path;
+            return (
+              <button key={item.path} onClick={() => setLocation(item.path)}
+                className={`w-full flex items-center gap-3 px-2.5 py-2 rounded-md text-sm transition-all duration-200 ${isActive ? "bg-primary/15 text-primary font-medium" : "text-muted-foreground hover:text-foreground hover:bg-sidebar-accent/50"}`}
+                title={collapsed ? item.label : undefined}
+              >
+                <Icon className={`h-4 w-4 shrink-0 ${isActive ? "text-primary" : ""}`} />
+                {!collapsed && <span className="truncate">{item.label}</span>}
+              </button>
+            );
+          })}
+        </div>
       </nav>
     </aside>
   );
@@ -328,7 +420,9 @@ function MobileSidebar({ open, onClose }: { open: boolean; onClose: () => void }
   const { section } = useSection();
   const { user, isAuthenticated, logout } = useAuth();
   const { theme, toggleTheme } = useTheme();
-  const items = section === "sports" ? SPORT_ITEMS : CASINO_ITEMS;
+  const { selectedLeague, setSelectedLeague } = useSection();
+  const sportsQuery = trpc.sports.list.useQuery(undefined, { enabled: section === "sports" });
+  const items = CASINO_ITEMS;
 
   // Lock body scroll when sidebar is open
   useEffect(() => {
@@ -379,7 +473,7 @@ function MobileSidebar({ open, onClose }: { open: boolean; onClose: () => void }
               <p className="text-[10px] uppercase tracking-wider text-muted-foreground px-2 mb-2 font-semibold">Hızlı Erişim</p>
               {section === "sports" ? (
                 <>
-                  <MobileSidebarLink path="/sports" label="📊 Sporlar" location={location} setLocation={setLocation} />
+                  <MobileSidebarLink path="/sports" label="📊 Tüm Maçlar" location={location} setLocation={setLocation} onClick={() => setSelectedLeague(null)} />
                   <MobileSidebarLink path="/live" label="📡 Canlı Skorlar" location={location} setLocation={setLocation} />
                   <MobileSidebarLink path="/my-bets" label="🎫 Kuponlarım" location={location} setLocation={setLocation} />
                   <MobileSidebarLink path="/wallet" label="💰 Cüzdan" location={location} setLocation={setLocation} />
@@ -398,30 +492,58 @@ function MobileSidebar({ open, onClose }: { open: boolean; onClose: () => void }
 
             {/* Main sidebar items */}
             <nav className="flex-1 overflow-y-auto px-3 py-3 space-y-0.5">
-              <p className="text-[10px] uppercase tracking-wider text-muted-foreground px-2 mb-2 font-semibold">
-                {section === "sports" ? "Spor Dalları" : "Casino Oyunları"}
-              </p>
-              {items.map((item, i) => {
-                if ("type" in item && item.type === "divider") {
-                  return <div key={`div-${i}`} className="my-2 border-t border-sidebar-border" />;
-                }
-                const navItem = item as { label: string; path: string; icon: any };
-                const Icon = navItem.icon;
-                const isActive = location === navItem.path || (navItem.path !== "/" && location.startsWith(navItem.path));
-
-                return (
-                  <button
-                    key={navItem.path}
-                    onClick={() => setLocation(navItem.path)}
-                    className={`w-full flex items-center gap-3 px-2.5 py-2.5 rounded-md text-sm transition-all duration-200 ${
-                      isActive ? "bg-primary/15 text-primary font-medium" : "text-muted-foreground hover:text-foreground hover:bg-sidebar-accent/50"
-                    }`}
-                  >
-                    <Icon className={`h-4 w-4 shrink-0 ${isActive ? "text-primary" : ""}`} />
-                    <span className="truncate">{navItem.label}</span>
-                  </button>
-                );
-              })}
+              {section === "sports" && sportsQuery.data ? (
+                <>
+                  <p className="text-[10px] uppercase tracking-wider text-muted-foreground px-2 mb-2 font-semibold">Ligler</p>
+                  {(() => {
+                    const groups: Record<string, typeof sportsQuery.data> = {};
+                    for (const s of sportsQuery.data!) {
+                      if (!groups[s.groupName]) groups[s.groupName] = [];
+                      groups[s.groupName]!.push(s);
+                    }
+                    return Object.entries(groups).map(([group, sports]) => (
+                      <div key={group} className="mb-2">
+                        <div className="text-[10px] text-muted-foreground uppercase tracking-wider px-2.5 mb-1 font-semibold">{group}</div>
+                        {(sports ?? []).map((s) => {
+                          const isActive = location === "/sports" && selectedLeague === s.sportKey;
+                          return (
+                            <button key={s.sportKey} onClick={() => { setSelectedLeague(s.sportKey); setLocation("/sports"); }}
+                              className={`w-full flex items-center gap-3 px-2.5 py-2 rounded-md text-sm transition-all duration-200 ${
+                                isActive ? "bg-primary/15 text-primary font-medium" : "text-muted-foreground hover:text-foreground hover:bg-sidebar-accent/50"
+                              }`}
+                            >
+                              <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${isActive ? "bg-primary" : "bg-muted-foreground/30"}`} />
+                              <span className="truncate">{s.title}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    ));
+                  })()}
+                </>
+              ) : (
+                <>
+                  <p className="text-[10px] uppercase tracking-wider text-muted-foreground px-2 mb-2 font-semibold">Casino Oyunları</p>
+                  {items.map((item, i) => {
+                    if ("type" in item && item.type === "divider") {
+                      return <div key={`div-${i}`} className="my-2 border-t border-sidebar-border" />;
+                    }
+                    const navItem = item as { label: string; path: string; icon: any };
+                    const Icon = navItem.icon;
+                    const isActive = location === navItem.path || (navItem.path !== "/" && location.startsWith(navItem.path));
+                    return (
+                      <button key={navItem.path} onClick={() => setLocation(navItem.path)}
+                        className={`w-full flex items-center gap-3 px-2.5 py-2.5 rounded-md text-sm transition-all duration-200 ${
+                          isActive ? "bg-primary/15 text-primary font-medium" : "text-muted-foreground hover:text-foreground hover:bg-sidebar-accent/50"
+                        }`}
+                      >
+                        <Icon className={`h-4 w-4 shrink-0 ${isActive ? "text-primary" : ""}`} />
+                        <span className="truncate">{navItem.label}</span>
+                      </button>
+                    );
+                  })}
+                </>
+              )}
             </nav>
 
             {/* Footer - user info & actions */}
@@ -476,11 +598,11 @@ function MobileSidebar({ open, onClose }: { open: boolean; onClose: () => void }
   );
 }
 
-function MobileSidebarLink({ path, label, location, setLocation }: { path: string; label: string; location: string; setLocation: (p: string) => void }) {
+function MobileSidebarLink({ path, label, location, setLocation, onClick }: { path: string; label: string; location: string; setLocation: (p: string) => void; onClick?: () => void }) {
   const isActive = location === path;
   return (
     <button
-      onClick={() => setLocation(path)}
+      onClick={() => { onClick?.(); setLocation(path); }}
       className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-md text-sm transition-colors ${
         isActive ? "bg-primary/10 text-primary font-semibold" : "text-muted-foreground hover:text-foreground hover:bg-sidebar-accent/50"
       }`}
@@ -803,12 +925,13 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const [section, setSection] = useState<Section>(
     location.startsWith("/casino") ? "casino" : "sports"
   );
+  const [selectedLeague, setSelectedLeague] = useState<string | null>(null);
 
   // Sync section with route
   const effectiveSection = location.startsWith("/casino") ? "casino" : section;
 
   return (
-    <SectionContext.Provider value={{ section: effectiveSection, setSection }}>
+    <SectionContext.Provider value={{ section: effectiveSection, setSection, selectedLeague, setSelectedLeague }}>
       <div className="h-screen flex flex-col bg-background text-foreground">
         <TopBar onMenuToggle={() => setMobileSidebarOpen(prev => !prev)} />
         <div className="flex flex-1 overflow-hidden">

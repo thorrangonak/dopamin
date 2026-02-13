@@ -1,15 +1,15 @@
 import { trpc } from "@/lib/trpc";
 import { useBetSlip } from "@/contexts/BetSlipContext";
-import { useState, useMemo } from "react";
+import { useMemo } from "react";
 import { useLocation } from "wouter";
-import { Loader2, Search, Clock, ExternalLink, ChevronRight, Activity } from "lucide-react";
+import { Loader2, Clock, ExternalLink, ChevronRight } from "lucide-react";
 import { format } from "date-fns";
 import { tr } from "date-fns/locale";
+import { useSection } from "@/components/AppLayout";
 
 export default function Sports() {
   const sportsQuery = trpc.sports.list.useQuery();
-  const [selectedSport, setSelectedSport] = useState<string | null>(null);
-  const [searchTerm, setSearchTerm] = useState("");
+  const { selectedLeague: selectedSport, setSelectedLeague: setSelectedSport } = useSection();
   const [, setLocation] = useLocation();
   const { addSelection, isSelected } = useBetSlip();
 
@@ -27,31 +27,6 @@ export default function Sports() {
   // Active query based on mode
   const events = selectedSport ? sportQuery.data : featuredQuery.data;
   const isLoading = selectedSport ? sportQuery.isLoading : featuredQuery.isLoading;
-
-  // Group sports for sidebar
-  const groupedSports = useMemo(() => {
-    if (!sportsQuery.data) return {};
-    const groups: Record<string, typeof sportsQuery.data> = {};
-    for (const s of sportsQuery.data) {
-      const g = s.groupName;
-      if (!groups[g]) groups[g] = [];
-      groups[g].push(s);
-    }
-    return groups;
-  }, [sportsQuery.data]);
-
-  const filteredGroups = useMemo(() => {
-    if (!searchTerm) return groupedSports;
-    const term = searchTerm.toLowerCase();
-    const result: Record<string, typeof sportsQuery.data> = {};
-    for (const [group, sports] of Object.entries(groupedSports)) {
-      const filtered = (sports ?? []).filter(s =>
-        s.title.toLowerCase().includes(term) || s.groupName.toLowerCase().includes(term)
-      );
-      if (filtered.length > 0) result[group] = filtered;
-    }
-    return result;
-  }, [groupedSports, searchTerm]);
 
   // Group events by sport_key for the "all" view
   const groupedEvents = useMemo(() => {
@@ -78,112 +53,8 @@ export default function Sports() {
     return null;
   }
 
-  // League tabs for mobile
-  const popularLeagues = useMemo(() => {
-    if (!sportsQuery.data) return [];
-    const popular = [
-      "soccer_turkey_super_league", "soccer_epl", "soccer_spain_la_liga",
-      "soccer_uefa_champs_league", "basketball_nba", "basketball_euroleague",
-    ];
-    return sportsQuery.data.filter(s => popular.includes(s.sportKey));
-  }, [sportsQuery.data]);
-
   return (
     <div className="p-4 md:p-6">
-      <div className="flex gap-6">
-        {/* Desktop sidebar */}
-        <div className="w-56 shrink-0 hidden lg:block">
-          <div className="sticky top-4">
-            <div className="relative mb-3">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <input
-                type="text"
-                placeholder="Lig ara..."
-                value={searchTerm}
-                onChange={e => setSearchTerm(e.target.value)}
-                className="w-full pl-9 pr-3 py-2 bg-secondary border border-border rounded-md text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-              />
-            </div>
-            <div className="h-[calc(100vh-10rem)] overflow-y-auto space-y-3 pr-1">
-              {/* "All" option */}
-              <button
-                onClick={() => setSelectedSport(null)}
-                className={`w-full text-left px-3 py-2 rounded-md text-sm font-medium transition-colors flex items-center gap-2 ${
-                  !selectedSport
-                    ? "bg-primary/15 text-primary"
-                    : "text-foreground hover:bg-accent"
-                }`}
-              >
-                <Activity className="h-4 w-4" />
-                Tüm Ligler
-              </button>
-              <div className="border-t border-border my-2" />
-              {Object.entries(filteredGroups).map(([group, sports]) => (
-                <div key={group}>
-                  <div className="text-[11px] text-muted-foreground uppercase tracking-wider mb-1 px-2 font-medium">
-                    {group}
-                  </div>
-                  {(sports ?? []).map(s => (
-                    <button
-                      key={s.sportKey}
-                      onClick={() => setSelectedSport(s.sportKey)}
-                      className={`w-full text-left px-3 py-1.5 rounded-md text-sm transition-colors ${
-                        selectedSport === s.sportKey
-                          ? "bg-primary/15 text-primary font-medium"
-                          : "text-foreground hover:bg-accent"
-                      }`}
-                    >
-                      {s.title}
-                    </button>
-                  ))}
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-
-        {/* Main content */}
-        <div className="flex-1 min-w-0">
-          {/* Mobile: horizontal league tabs */}
-          <div className="lg:hidden mb-4 -mx-4 px-4">
-            <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
-              <button
-                onClick={() => setSelectedSport(null)}
-                className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-semibold transition-colors ${
-                  !selectedSport
-                    ? "dp-gradient-bg text-white"
-                    : "bg-secondary text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                Tümü
-              </button>
-              {popularLeagues.map(s => (
-                <button
-                  key={s.sportKey}
-                  onClick={() => setSelectedSport(s.sportKey)}
-                  className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-semibold transition-colors whitespace-nowrap ${
-                    selectedSport === s.sportKey
-                      ? "dp-gradient-bg text-white"
-                      : "bg-secondary text-muted-foreground hover:text-foreground"
-                  }`}
-                >
-                  {s.title}
-                </button>
-              ))}
-              {/* More leagues dropdown on mobile */}
-              <select
-                value={selectedSport || ""}
-                onChange={e => setSelectedSport(e.target.value || null)}
-                className="shrink-0 px-3 py-1.5 rounded-full text-xs font-semibold bg-secondary text-muted-foreground border-0 appearance-none cursor-pointer"
-              >
-                <option value="">Diğer Ligler ▾</option>
-                {sportsQuery.data?.filter(s => !popularLeagues.find(p => p.sportKey === s.sportKey)).map(s => (
-                  <option key={s.sportKey} value={s.sportKey}>{s.title}</option>
-                ))}
-              </select>
-            </div>
-          </div>
-
           {/* Loading */}
           {isLoading ? (
             <div className="flex items-center justify-center py-20">
@@ -251,8 +122,6 @@ export default function Sports() {
               ))}
             </div>
           )}
-        </div>
-      </div>
     </div>
   );
 }
