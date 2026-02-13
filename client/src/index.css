@@ -1,0 +1,347 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+  /* Dopamin brand colors */
+  --color-dp-purple: var(--dp-purple);
+  --color-dp-pink: var(--dp-pink);
+  --color-dp-blue: var(--dp-blue);
+  --color-dp-green: var(--dp-green);
+  --color-dp-yellow: var(--dp-yellow);
+  --color-dp-red: var(--dp-red);
+  --color-dp-surface: var(--dp-surface);
+  --color-dp-surface-hover: var(--dp-surface-hover);
+  /* Legacy color mappings */
+  --color-stake-blue: var(--dp-blue);
+  --color-stake-green: var(--dp-green);
+}
+
+/* ─── Light Theme ─── */
+:root {
+  --radius: 0.5rem;
+  --background: oklch(0.96 0.008 280);
+  --foreground: oklch(0.13 0.03 280);
+  --card: oklch(0.99 0.003 280);
+  --card-foreground: oklch(0.13 0.03 280);
+  --popover: oklch(0.99 0.003 280);
+  --popover-foreground: oklch(0.13 0.03 280);
+  --primary: oklch(0.55 0.25 300);
+  --primary-foreground: oklch(0.98 0 0);
+  --secondary: oklch(0.92 0.01 280);
+  --secondary-foreground: oklch(0.3 0.03 280);
+  --muted: oklch(0.92 0.008 280);
+  --muted-foreground: oklch(0.5 0.015 280);
+  --accent: oklch(0.88 0.02 300);
+  --accent-foreground: oklch(0.13 0.03 280);
+  --destructive: oklch(0.55 0.22 25);
+  --destructive-foreground: oklch(0.98 0 0);
+  --border: oklch(0.87 0.012 280);
+  --input: oklch(0.87 0.012 280);
+  --ring: oklch(0.55 0.25 300);
+  --chart-1: oklch(0.55 0.25 300);
+  --chart-2: oklch(0.65 0.2 330);
+  --chart-3: oklch(0.6 0.15 250);
+  --chart-4: oklch(0.7 0.2 145);
+  --chart-5: oklch(0.75 0.15 85);
+  --sidebar: oklch(0.94 0.01 280);
+  --sidebar-foreground: oklch(0.13 0.03 280);
+  --sidebar-primary: oklch(0.55 0.25 300);
+  --sidebar-primary-foreground: oklch(0.98 0 0);
+  --sidebar-accent: oklch(0.9 0.015 300);
+  --sidebar-accent-foreground: oklch(0.13 0.03 280);
+  --sidebar-border: oklch(0.87 0.012 280);
+  --sidebar-ring: oklch(0.55 0.25 300);
+  /* Dopamin palette */
+  --dp-purple: oklch(0.55 0.25 300);
+  --dp-pink: oklch(0.65 0.25 340);
+  --dp-blue: oklch(0.6 0.18 250);
+  --dp-green: oklch(0.7 0.2 145);
+  --dp-yellow: oklch(0.82 0.16 85);
+  --dp-red: oklch(0.6 0.22 25);
+  --dp-surface: oklch(0.94 0.01 280);
+  --dp-surface-hover: oklch(0.9 0.015 280);
+}
+
+/* ─── Dark Theme (default for Dopamin) ─── */
+.dark {
+  --background: oklch(0.12 0.025 280);
+  --foreground: oklch(0.93 0.008 280);
+  --card: oklch(0.16 0.025 280);
+  --card-foreground: oklch(0.93 0.008 280);
+  --popover: oklch(0.16 0.025 280);
+  --popover-foreground: oklch(0.93 0.008 280);
+  --primary: oklch(0.7 0.25 300);
+  --primary-foreground: oklch(0.98 0 0);
+  --secondary: oklch(0.2 0.025 280);
+  --secondary-foreground: oklch(0.85 0.008 280);
+  --muted: oklch(0.2 0.02 280);
+  --muted-foreground: oklch(0.55 0.015 280);
+  --accent: oklch(0.22 0.03 280);
+  --accent-foreground: oklch(0.93 0.008 280);
+  --destructive: oklch(0.6 0.22 25);
+  --destructive-foreground: oklch(0.98 0 0);
+  --border: oklch(0.24 0.025 280);
+  --input: oklch(0.2 0.025 280);
+  --ring: oklch(0.7 0.25 300);
+  --chart-1: oklch(0.7 0.25 300);
+  --chart-2: oklch(0.72 0.22 340);
+  --chart-3: oklch(0.65 0.18 250);
+  --chart-4: oklch(0.75 0.2 145);
+  --chart-5: oklch(0.8 0.15 85);
+  --sidebar: oklch(0.1 0.025 280);
+  --sidebar-foreground: oklch(0.93 0.008 280);
+  --sidebar-primary: oklch(0.7 0.25 300);
+  --sidebar-primary-foreground: oklch(0.98 0 0);
+  --sidebar-accent: oklch(0.18 0.03 280);
+  --sidebar-accent-foreground: oklch(0.93 0.008 280);
+  --sidebar-border: oklch(0.24 0.025 280);
+  --sidebar-ring: oklch(0.7 0.25 300);
+  /* Dopamin palette - dark mode */
+  --dp-purple: oklch(0.7 0.25 300);
+  --dp-pink: oklch(0.72 0.22 340);
+  --dp-blue: oklch(0.65 0.18 250);
+  --dp-green: oklch(0.75 0.2 145);
+  --dp-yellow: oklch(0.85 0.16 85);
+  --dp-red: oklch(0.65 0.22 25);
+  --dp-surface: oklch(0.18 0.025 280);
+  --dp-surface-hover: oklch(0.22 0.03 280);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground font-[Inter,system-ui,sans-serif] antialiased;
+  }
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]),
+  [type="button"]:not(:disabled),
+  [type="submit"]:not(:disabled),
+  [type="reset"]:not(:disabled),
+  a[href],
+  select:not(:disabled),
+  input[type="checkbox"]:not(:disabled),
+  input[type="radio"]:not(:disabled) {
+    @apply cursor-pointer;
+  }
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 5px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--muted-foreground);
+}
+
+/* ─── Dopamin Brand Utilities ─── */
+
+/* ─── Dopamin Wordmark ─── */
+.dp-wordmark {
+  font-family: 'Syne', system-ui, sans-serif;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 1;
+}
+
+/* Gradient text */
+.dp-gradient-text {
+  background: linear-gradient(135deg, var(--dp-purple), var(--dp-pink));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* Gradient backgrounds */
+.dp-gradient-bg {
+  background: linear-gradient(135deg, var(--dp-purple), var(--dp-pink));
+}
+.dp-gradient-bg-subtle {
+  background: linear-gradient(135deg, oklch(from var(--dp-purple) l c h / 0.15), oklch(from var(--dp-pink) l c h / 0.1));
+}
+
+/* Glow effects */
+.dp-glow {
+  box-shadow: 0 0 20px oklch(from var(--dp-purple) l c h / 0.3),
+              0 0 60px oklch(from var(--dp-purple) l c h / 0.1);
+}
+.dp-glow-pink {
+  box-shadow: 0 0 20px oklch(from var(--dp-pink) l c h / 0.3),
+              0 0 60px oklch(from var(--dp-pink) l c h / 0.1);
+}
+.dp-glow-sm {
+  box-shadow: 0 0 10px oklch(from var(--dp-purple) l c h / 0.2);
+}
+
+/* Glass effect */
+.dp-glass {
+  background: oklch(from var(--card) l c h / 0.7);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+/* Odds button styles */
+.odds-btn {
+  @apply flex flex-col items-center justify-center px-3 py-2 rounded-lg bg-secondary text-secondary-foreground transition-all duration-200 text-sm font-medium;
+}
+.odds-btn:hover {
+  @apply bg-accent;
+  box-shadow: 0 0 8px oklch(from var(--dp-purple) l c h / 0.15);
+}
+.odds-btn.selected {
+  background: linear-gradient(135deg, var(--dp-purple), var(--dp-pink));
+  color: white;
+  box-shadow: 0 0 12px oklch(from var(--dp-purple) l c h / 0.3);
+}
+
+/* Live indicator pulse */
+.live-pulse {
+  @apply relative;
+}
+.live-pulse::before {
+  content: '';
+  @apply absolute -left-2.5 top-1/2 -translate-y-1/2 w-2 h-2 rounded-full;
+  background: var(--dp-green);
+  animation: pulse-dot 1.5s ease-in-out infinite;
+}
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; transform: translateY(-50%) scale(1); }
+  50% { opacity: 0.4; transform: translateY(-50%) scale(0.8); }
+}
+
+/* Shimmer animation */
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+.dp-shimmer {
+  background: linear-gradient(90deg, transparent 0%, oklch(from var(--dp-purple) l c h / 0.1) 50%, transparent 100%);
+  background-size: 200% 100%;
+  animation: shimmer 3s ease-in-out infinite;
+}
+
+/* Float animation */
+@keyframes float {
+  0%, 100% { transform: translateY(0px); }
+  50% { transform: translateY(-6px); }
+}
+.dp-float {
+  animation: float 3s ease-in-out infinite;
+}
+
+/* ─── Neurotransmitter Utilities ─── */
+
+/* Animated neural pathway line */
+@keyframes neural-signal {
+  0% { stroke-dashoffset: 800; }
+  100% { stroke-dashoffset: 0; }
+}
+.dp-neural-path {
+  stroke-dasharray: 12 8;
+  animation: neural-signal 4s linear infinite;
+}
+
+/* Synapse pulse animation */
+@keyframes synapse-pulse {
+  0%, 100% { opacity: 0.4; transform: scale(1); }
+  50% { opacity: 0.8; transform: scale(1.4); }
+}
+.dp-synapse-pulse {
+  animation: synapse-pulse 2s ease-in-out infinite;
+}
+
+/* Hexagonal clip-path */
+.dp-hex-clip {
+  clip-path: polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%);
+}
+
+/* Sport icon badge */
+.sport-badge {
+  @apply inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-secondary text-muted-foreground;
+}
+
+/* Card hover effect */
+.dp-card-hover {
+  @apply transition-all duration-300;
+}
+.dp-card-hover:hover {
+  @apply border-primary/30;
+  box-shadow: 0 4px 20px oklch(from var(--dp-purple) l c h / 0.1);
+  transform: translateY(-1px);
+}
+
+@layer components {
+  .container {
+    width: 100%;
+    margin-left: auto;
+    margin-right: auto;
+    padding-left: 1rem;
+    padding-right: 1rem;
+  }
+
+  .flex {
+    min-height: 0;
+    min-width: 0;
+  }
+
+  @media (min-width: 640px) {
+    .container {
+      padding-left: 1.5rem;
+      padding-right: 1.5rem;
+    }
+  }
+
+  @media (min-width: 1024px) {
+    .container {
+      padding-left: 2rem;
+      padding-right: 2rem;
+      max-width: 1400px;
+    }
+  }
+}

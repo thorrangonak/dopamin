@@ -1,0 +1,96 @@
+# Betmap - Project TODO
+
+- [x] Veritabanı şeması tasarımı (users, balances, bets, bet_items, transactions, sports_cache)
+- [x] Cyberpunk teması ve global stil ayarları (neon pembe, elektrik mavisi, derin siyah)
+- [x] The Odds API entegrasyonu - sporlar listesi endpoint
+- [x] The Odds API entegrasyonu - oranlar endpoint
+- [x] The Odds API entegrasyonu - skorlar/sonuçlar endpoint
+- [x] Kullanıcı bakiye sistemi - para yatırma/çekme
+- [x] Maç listesi görüntüleme - spor dalına göre filtreleme
+- [x] Bahis oranları görüntüleme - h2h, spreads, totals marketleri
+- [x] Tekli kupon oluşturma
+- [x] Kombine kupon oluşturma - toplam oran hesaplama
+- [x] Aktif kuponlar listesi - bekleyen/kazanan/kaybeden
+- [x] Otomatik kupon sonuçlandırma - scores endpoint ile
+- [x] Admin paneli - kullanıcı yönetimi
+- [x] Admin paneli - kupon yönetimi
+- [x] Admin paneli - bakiye hareketleri
+- [x] Kupon sonucu bildirim sistemi
+- [x] LLM destekli bahis asistanı
+- [ ] Çoklu dil desteği (Türkçe/İngilizce)
+- [x] Vitest testleri
+- [x] Tüm Bayedi referanslarını Betmap ile değiştirme
+- [x] Mobil uyumlu kupon sepeti - bottom sheet (açılır-kapanır)
+- [x] Mobil kupon sepeti floating action button (FAB)
+- [x] Canlı skor endpoint - The Odds API scores entegrasyonu
+- [x] Canlı skor sayfası - devam eden maçların skorlarını gösterme
+- [x] Kupon içi canlı skor gösterimi - aktif kuponlardaki maç skorları
+- [x] Otomatik skor yenileme (polling) - 30 saniyede bir güncelleme
+- [x] Navbar'a Canlı Skor linki ekleme
+- [x] Home sayfasına Canlı Skor Takibi özellik kartı ekleme
+- [x] Maç detay endpoint - tüm marketler (h2h, spreads, totals) tek maç için
+- [x] Maç detay sayfası - cyberpunk temalı detaylı maç görünümü
+- [x] Maç detay sayfasında canlı skor gösterimi
+- [x] Maç detay sayfasından bahis yapabilme (kupon sepetine ekleme)
+- [x] Sports sayfasından maç detay sayfasına yönlendirme
+- [x] Canlı Skor sayfasından maç detay sayfasına yönlendirme
+- [x] Tasarım dönüşümü: Cyberpunk → Stake tarzı koyu lacivert minimalist
+- [x] Yeni renk paleti: Koyu lacivert arka plan, yeşil aksan, düz renkler
+- [x] Font değişikliği: Orbitron/Rajdhani → Inter/sistem sans-serif
+- [x] Sol sidebar navigasyon: Spor dalları listesi (ikonlarla)
+- [x] Üst bar: Logo, navigasyon, kullanıcı menüsü
+- [x] Maç kartları: Minimal, yatay düzen, ince border ayrımları
+- [x] Oran butonları: Düz renkli, rounded, takım adı + oran birlikte
+- [x] Tüm sayfaları yeni tasarıma uyarlama (Sports, LiveScores, MyBets, Wallet, Admin, Assistant, EventDetail)
+- [x] Neon glow efektlerini ve HUD elementlerini kaldırma
+- [x] Casino/Spor ayrımı - üst bar'da geçiş butonları (Stake tarzı)
+- [x] Spor sidebar - spor dalları navigasyonu
+- [x] Casino sidebar - casino oyun kategorileri navigasyonu
+- [x] Casino ana sayfası - oyun kartları ve kategoriler
+- [x] Casino oyun sayfaları (Slots, Blackjack, Rulet, Poker vb.)
+- [x] Route yapısı güncelleme - /casino/* ve /sports/* ayrımı
+- [x] Sıkça Sorulan Sorular sayfası
+- [x] Casino oyun backend - bahis, sonuç hesaplama, bakiye entegrasyonu
+- [x] Coin Flip oyunu - yazı/tura, animasyonlu
+- [x] Dice oyunu - zar atma, hedef sayı tahmini
+- [x] Mines oyunu - mayın tarlası, kare açma mekanizması
+- [x] Crash oyunu - çarpan yükselme, cash out mekanizması
+- [x] Roulette oyunu - rulet çarkı, numara/renk bahisi
+- [x] Plinko oyunu - top düşürme, çarpan kazanma
+- [x] Mobil hamburger menü - üst bar navigasyon linklerini mobilde hamburger menü içine alma
+- [x] Mobil sidebar - hamburger menüden sidebar açılması
+- [x] Mobil bottom navigation bar
+- [x] Kullanıcı profil sayfası - genel bilgiler ve özet istatistikler
+- [x] Bahis istatistikleri endpoint - toplam bahis, kazanma oranı, kar/zarar
+- [x] Spor dalı dağılımı grafiği - en çok bahis yapılan sporlar (pie chart)
+- [x] Bakiye değişim grafiği - zaman serisi (line chart)
+- [x] Son bahisler ve casino oyunları geçmişi
+- [x] Profil sayfası route ve sidebar/navbar entegrasyonu
+- [x] Bug fix: Home'da eksik key prop hatası (sport.key → sport.sportKey)
+- [x] Bug fix: Menüdeki çift ikonları düzeltme - emoji'ler kaldırıldı, sadece lucide ikonları kaldı
+- [x] Üst bar Casino/Spor toggle'ındaki emoji'leri Lucide ikonlarıyla değiştirme
+- [x] Dark/Light tema geçişi - tema toggle butonu
+- [x] Light tema renk paleti oluşturma (index.css)
+- [x] ThemeProvider'ı switchable yapma
+- [x] TopBar'a tema toggle butonu ekleme
+- [x] VIP tier sistemi - veritabanı şeması (xp, tier seviyesi)
+- [x] VIP tier tanımları - Bronze, Silver, Gold, Platinum, Diamond, VIP Elite
+- [x] XP kazanma mekanizması - bahis ve casino aktivitelerinden XP
+- [x] VIP avantajları - cashback oranı, bonus çarpanı, özel promosyonlar
+- [x] VIP tier endpoint'leri - mevcut tier, XP, ilerleme bilgisi
+- [x] VIP sayfası - tier kartları, ilerleme çubuğu, avantaj listesi
+- [x] Profil ve sidebar'da VIP tier göstergesi
+- [x] Üst bar'da Betmap yazısının altına VIP ilerleme bar widget'ı ekleme
+- [x] Banner/slider sistemi - Stake tarzı promosyon carousel
+- [x] Banner tasarımları - spor ve casino promosyon görselleri (AI generated)
+- [x] Otomatik banner geçişi ve dot navigasyon
+- [x] Mobil uyumlu responsive banner
+- [x] Home ve Casino sayfalarına banner entegrasyonu
+- [x] Admin banner yönetim sistemi - veritabanı tablosu
+- [x] Banner CRUD API (ekleme, düzenleme, silme, sıralama)
+- [x] Admin UI - banner listesi, ekleme/düzenleme formu
+- [x] Banner sıralama (drag & drop veya ok butonları)
+- [x] Banner aktif/pasif durumu yönetimi
+- [x] Banner zamanlama (başlangıç/bitiş tarihi)
+- [x] Frontend - statik bannerları DB'den dinamik hale getirme
+- [ ] Banner görsel yükleme (S3 entegrasyonu)
