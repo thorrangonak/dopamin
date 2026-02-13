@@ -136,6 +136,46 @@ var chatMessages = mysqlTable("chat_messages", {
   content: text("content").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull()
 });
+var wallets = mysqlTable("wallets", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  network: mysqlEnum("network", ["tron", "ethereum", "bsc", "polygon", "solana", "bitcoin"]).notNull(),
+  addressIndex: int("addressIndex").notNull(),
+  depositAddress: varchar("depositAddress", { length: 128 }).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull()
+});
+var cryptoDeposits = mysqlTable("crypto_deposits", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  walletId: int("walletId").notNull(),
+  network: mysqlEnum("network", ["tron", "ethereum", "bsc", "polygon", "solana", "bitcoin"]).notNull(),
+  txHash: varchar("txHash", { length: 128 }).notNull().unique(),
+  fromAddress: varchar("fromAddress", { length: 128 }),
+  amount: decimal("amount", { precision: 18, scale: 8 }).notNull(),
+  tokenSymbol: varchar("tokenSymbol", { length: 10 }).notNull(),
+  confirmations: int("confirmations").notNull().default(0),
+  requiredConfirmations: int("requiredConfirmations").notNull(),
+  status: mysqlEnum("status", ["pending", "confirming", "confirmed", "credited", "failed"]).default("pending").notNull(),
+  creditedAt: timestamp("creditedAt"),
+  sweepTxHash: varchar("sweepTxHash", { length: 128 }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull()
+});
+var cryptoWithdrawals = mysqlTable("crypto_withdrawals", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  network: mysqlEnum("network", ["tron", "ethereum", "bsc", "polygon", "solana", "bitcoin"]).notNull(),
+  toAddress: varchar("toAddress", { length: 128 }).notNull(),
+  amount: decimal("amount", { precision: 12, scale: 2 }).notNull(),
+  fee: decimal("fee", { precision: 12, scale: 2 }).notNull(),
+  tokenSymbol: varchar("tokenSymbol", { length: 10 }).notNull(),
+  status: mysqlEnum("status", ["pending", "approved", "processing", "completed", "rejected", "failed"]).default("pending").notNull(),
+  txHash: varchar("txHash", { length: 128 }),
+  reviewedBy: int("reviewedBy"),
+  adminNote: text("adminNote"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  processedAt: timestamp("processedAt")
+});
 
 // server/_core/env.ts
 var ENV = {

@@ -1,3 +1,10 @@
+var __require = /* @__PURE__ */ ((x) => typeof require !== "undefined" ? require : typeof Proxy !== "undefined" ? new Proxy(x, {
+  get: (a, b) => (typeof require !== "undefined" ? require : a)[b]
+}) : x)(function(x) {
+  if (typeof require !== "undefined") return require.apply(this, arguments);
+  throw Error('Dynamic require of "' + x + '" is not supported');
+});
+
 // server/vercel/trpc-handler.ts
 import "dotenv/config";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
@@ -321,6 +328,46 @@ var chatMessages = mysqlTable("chat_messages", {
   role: mysqlEnum("role", ["user", "assistant"]).notNull(),
   content: text("content").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull()
+});
+var wallets = mysqlTable("wallets", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  network: mysqlEnum("network", ["tron", "ethereum", "bsc", "polygon", "solana", "bitcoin"]).notNull(),
+  addressIndex: int("addressIndex").notNull(),
+  depositAddress: varchar("depositAddress", { length: 128 }).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull()
+});
+var cryptoDeposits = mysqlTable("crypto_deposits", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  walletId: int("walletId").notNull(),
+  network: mysqlEnum("network", ["tron", "ethereum", "bsc", "polygon", "solana", "bitcoin"]).notNull(),
+  txHash: varchar("txHash", { length: 128 }).notNull().unique(),
+  fromAddress: varchar("fromAddress", { length: 128 }),
+  amount: decimal("amount", { precision: 18, scale: 8 }).notNull(),
+  tokenSymbol: varchar("tokenSymbol", { length: 10 }).notNull(),
+  confirmations: int("confirmations").notNull().default(0),
+  requiredConfirmations: int("requiredConfirmations").notNull(),
+  status: mysqlEnum("status", ["pending", "confirming", "confirmed", "credited", "failed"]).default("pending").notNull(),
+  creditedAt: timestamp("creditedAt"),
+  sweepTxHash: varchar("sweepTxHash", { length: 128 }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull()
+});
+var cryptoWithdrawals = mysqlTable("crypto_withdrawals", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  network: mysqlEnum("network", ["tron", "ethereum", "bsc", "polygon", "solana", "bitcoin"]).notNull(),
+  toAddress: varchar("toAddress", { length: 128 }).notNull(),
+  amount: decimal("amount", { precision: 12, scale: 2 }).notNull(),
+  fee: decimal("fee", { precision: 12, scale: 2 }).notNull(),
+  tokenSymbol: varchar("tokenSymbol", { length: 10 }).notNull(),
+  status: mysqlEnum("status", ["pending", "approved", "processing", "completed", "rejected", "failed"]).default("pending").notNull(),
+  txHash: varchar("txHash", { length: 128 }),
+  reviewedBy: int("reviewedBy"),
+  adminNote: text("adminNote"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  processedAt: timestamp("processedAt")
 });
 
 // server/db.ts
@@ -742,6 +789,138 @@ async function clearChatHistory(userId) {
   const db = await getDb();
   if (!db) return;
   await db.delete(chatMessages).where(eq(chatMessages.userId, userId));
+}
+async function createWallet(userId, network, addressIndex, depositAddress) {
+  const db = await getDb();
+  if (!db) return null;
+  const [inserted] = await db.insert(wallets).values({
+    userId,
+    network,
+    addressIndex,
+    depositAddress
+  }).$returningId();
+  return inserted.id;
+}
+async function getUserWallet(userId, network) {
+  const db = await getDb();
+  if (!db) return null;
+  const result = await db.select().from(wallets).where(and(eq(wallets.userId, userId), eq(wallets.network, network))).limit(1);
+  return result.length > 0 ? result[0] : null;
+}
+async function getUserWallets(userId) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(wallets).where(eq(wallets.userId, userId));
+}
+async function getNextAddressIndex() {
+  const db = await getDb();
+  if (!db) return 1;
+  const result = await db.select({ maxIdx: sql`MAX(${wallets.addressIndex})` }).from(wallets);
+  const max = result[0]?.maxIdx;
+  return (typeof max === "number" ? max : 0) + 1;
+}
+async function updateWalletAddress(walletId, newAddressIndex, newAddress) {
+  const db = await getDb();
+  if (!db) return;
+  await db.update(wallets).set({
+    addressIndex: newAddressIndex,
+    depositAddress: newAddress
+  }).where(eq(wallets.id, walletId));
+}
+async function getActiveDepositAddresses(network) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(wallets).where(eq(wallets.network, network));
+}
+async function getUserCryptoDeposits(userId) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(cryptoDeposits).where(eq(cryptoDeposits.userId, userId)).orderBy(desc(cryptoDeposits.createdAt));
+}
+async function getAllCryptoDeposits(limit = 100) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(cryptoDeposits).orderBy(desc(cryptoDeposits.createdAt)).limit(limit);
+}
+async function createWithdrawal(data) {
+  const db = await getDb();
+  if (!db) return null;
+  const [inserted] = await db.insert(cryptoWithdrawals).values({
+    userId: data.userId,
+    network: data.network,
+    toAddress: data.toAddress,
+    amount: data.amount,
+    fee: data.fee,
+    tokenSymbol: data.tokenSymbol
+  }).$returningId();
+  return inserted.id;
+}
+async function updateWithdrawalStatus(id, status, txHash, reviewedBy, adminNote) {
+  const db = await getDb();
+  if (!db) return;
+  const updateData = { status };
+  if (txHash) updateData.txHash = txHash;
+  if (reviewedBy) updateData.reviewedBy = reviewedBy;
+  if (adminNote !== void 0) updateData.adminNote = adminNote;
+  if (status === "completed" || status === "rejected" || status === "failed") {
+    updateData.processedAt = /* @__PURE__ */ new Date();
+  }
+  await db.update(cryptoWithdrawals).set(updateData).where(eq(cryptoWithdrawals.id, id));
+}
+async function getWithdrawalById(id) {
+  const db = await getDb();
+  if (!db) return null;
+  const result = await db.select().from(cryptoWithdrawals).where(eq(cryptoWithdrawals.id, id)).limit(1);
+  return result.length > 0 ? result[0] : null;
+}
+async function getPendingWithdrawals() {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(cryptoWithdrawals).where(eq(cryptoWithdrawals.status, "pending")).orderBy(desc(cryptoWithdrawals.createdAt));
+}
+async function getUserWithdrawals(userId) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(cryptoWithdrawals).where(eq(cryptoWithdrawals.userId, userId)).orderBy(desc(cryptoWithdrawals.createdAt));
+}
+async function atomicDeductBalance(userId, totalCost, description) {
+  const db = await getDb();
+  if (!db) return { success: false, error: "DB unavailable" };
+  try {
+    await db.transaction(async (tx) => {
+      const bal = await tx.select().from(balances).where(eq(balances.userId, userId)).for("update").limit(1);
+      if (!bal.length || parseFloat(bal[0].amount) < totalCost) {
+        throw new Error("Yetersiz bakiye");
+      }
+      await tx.update(balances).set({ amount: sql`amount - ${totalCost.toFixed(2)}` }).where(eq(balances.userId, userId));
+      await tx.insert(transactions).values({
+        userId,
+        type: "withdraw",
+        amount: totalCost.toFixed(2),
+        description
+      });
+    });
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err.message || "Transaction failed" };
+  }
+}
+async function getUserDailyWithdrawalTotal(userId) {
+  const db = await getDb();
+  if (!db) return 0;
+  const result = await db.select({ total: sql`COALESCE(SUM(amount), 0)` }).from(cryptoWithdrawals).where(and(
+    eq(cryptoWithdrawals.userId, userId),
+    gte(cryptoWithdrawals.createdAt, sql`DATE_SUB(NOW(), INTERVAL 24 HOUR)`),
+    // Count all non-rejected withdrawals
+    sql`${cryptoWithdrawals.status} != 'rejected'`,
+    sql`${cryptoWithdrawals.status} != 'failed'`
+  ));
+  return parseFloat(result[0]?.total || "0");
+}
+async function getAllWithdrawals(limit = 100) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(cryptoWithdrawals).orderBy(desc(cryptoWithdrawals.createdAt)).limit(limit);
 }
 
 // server/_core/sdk.ts
@@ -1698,6 +1877,655 @@ function getDemoLiveEventsClean() {
     commenceTime: e.commenceTime,
     scoresJson: e.scoresJson
   }));
+}
+
+// server/lib/wallet/hdDerivation.ts
+import * as bip39 from "bip39";
+import { createHash } from "crypto";
+function getMnemonic() {
+  const mnemonic = process.env.WALLET_MNEMONIC;
+  if (!mnemonic) throw new Error("WALLET_MNEMONIC not set in environment");
+  if (!bip39.validateMnemonic(mnemonic)) throw new Error("Invalid WALLET_MNEMONIC");
+  return mnemonic;
+}
+async function getSeedBuffer() {
+  return bip39.mnemonicToSeed(getMnemonic());
+}
+async function deriveEvmAddress(userIndex) {
+  const { ethers } = await import("ethers");
+  const mnemonic = getMnemonic();
+  const path = `m/44'/60'/${userIndex}'/0/0`;
+  const wallet = ethers.HDNodeWallet.fromMnemonic(ethers.Mnemonic.fromPhrase(mnemonic), path);
+  return { address: wallet.address, path };
+}
+async function getEvmPrivateKey(userIndex) {
+  const { ethers } = await import("ethers");
+  const mnemonic = getMnemonic();
+  const path = `m/44'/60'/${userIndex}'/0/0`;
+  const wallet = ethers.HDNodeWallet.fromMnemonic(ethers.Mnemonic.fromPhrase(mnemonic), path);
+  return wallet.privateKey;
+}
+function base58Encode(buffer) {
+  const ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+  const digits = [0];
+  for (let i = 0; i < buffer.length; i++) {
+    let carry = buffer[i];
+    for (let j = 0; j < digits.length; j++) {
+      carry += digits[j] << 8;
+      digits[j] = carry % 58;
+      carry = carry / 58 | 0;
+    }
+    while (carry > 0) {
+      digits.push(carry % 58);
+      carry = carry / 58 | 0;
+    }
+  }
+  let result = "";
+  for (let i = 0; i < buffer.length && buffer[i] === 0; i++) {
+    result += "1";
+  }
+  for (let i = digits.length - 1; i >= 0; i--) {
+    result += ALPHABET[digits[i]];
+  }
+  return result;
+}
+function ethAddressToTron(ethAddress) {
+  const hex = ethAddress.slice(2);
+  const tronHex = "41" + hex;
+  const bytes = Buffer.from(tronHex, "hex");
+  const hash1 = createHash("sha256").update(bytes).digest();
+  const hash2 = createHash("sha256").update(hash1).digest();
+  const checksum = hash2.slice(0, 4);
+  const addressBytes = Buffer.concat([bytes, checksum]);
+  return base58Encode(addressBytes);
+}
+async function deriveTronAddress(userIndex) {
+  const { ethers } = await import("ethers");
+  const mnemonic = getMnemonic();
+  const path = `m/44'/195'/${userIndex}'/0/0`;
+  const wallet = ethers.HDNodeWallet.fromMnemonic(ethers.Mnemonic.fromPhrase(mnemonic), path);
+  const tronAddress = ethAddressToTron(wallet.address);
+  return { address: tronAddress, path };
+}
+async function getTronPrivateKey(userIndex) {
+  const { ethers } = await import("ethers");
+  const mnemonic = getMnemonic();
+  const path = `m/44'/195'/${userIndex}'/0/0`;
+  const wallet = ethers.HDNodeWallet.fromMnemonic(ethers.Mnemonic.fromPhrase(mnemonic), path);
+  return wallet.privateKey.slice(2);
+}
+async function deriveSolanaAddress(userIndex) {
+  const { derivePath } = await import("ed25519-hd-key");
+  const { Keypair } = await import("@solana/web3.js");
+  const seed = await getSeedBuffer();
+  const path = `m/44'/501'/${userIndex}'/0'`;
+  const derived = derivePath(path, seed.toString("hex"));
+  const keypair = Keypair.fromSeed(derived.key);
+  return { address: keypair.publicKey.toBase58(), path };
+}
+async function getSolanaKeypair(userIndex) {
+  const { derivePath } = await import("ed25519-hd-key");
+  const { Keypair } = await import("@solana/web3.js");
+  const seed = await getSeedBuffer();
+  const path = `m/44'/501'/${userIndex}'/0'`;
+  const derived = derivePath(path, seed.toString("hex"));
+  return Keypair.fromSeed(derived.key);
+}
+async function deriveBitcoinAddress(userIndex) {
+  const bitcoin = await import("bitcoinjs-lib");
+  const ecc = await import("tiny-secp256k1");
+  const { BIP32Factory } = await import("bip32");
+  const bip32 = BIP32Factory(ecc);
+  const seed = await getSeedBuffer();
+  const path = `m/44'/0'/${userIndex}'/0/0`;
+  const root = bip32.fromSeed(seed, bitcoin.networks.bitcoin);
+  const child = root.derivePath(path);
+  const { address } = bitcoin.payments.p2wpkh({
+    pubkey: Buffer.from(child.publicKey),
+    network: bitcoin.networks.bitcoin
+  });
+  if (!address) throw new Error("Failed to derive Bitcoin address");
+  return { address, path };
+}
+async function generateAddress(network, userIndex) {
+  switch (network) {
+    case "tron":
+      return deriveTronAddress(userIndex);
+    case "ethereum":
+    case "bsc":
+    case "polygon":
+      return deriveEvmAddress(userIndex);
+    case "solana":
+      return deriveSolanaAddress(userIndex);
+    case "bitcoin":
+      return deriveBitcoinAddress(userIndex);
+    default:
+      throw new Error(`Unsupported network: ${network}`);
+  }
+}
+async function getPrivateKey(network, userIndex) {
+  switch (network) {
+    case "tron":
+      return getTronPrivateKey(userIndex);
+    case "ethereum":
+    case "bsc":
+    case "polygon":
+      return getEvmPrivateKey(userIndex);
+    case "solana":
+      return getSolanaKeypair(userIndex);
+    case "bitcoin":
+      throw new Error("Use bitcoin module for private key operations");
+    default:
+      throw new Error(`Unsupported network: ${network}`);
+  }
+}
+
+// server/lib/wallet/index.ts
+var NETWORKS = {
+  tron: {
+    id: "tron",
+    name: "TRON",
+    symbol: "TRX",
+    token: "USDT TRC-20",
+    coinType: 195,
+    confirmations: 20,
+    rpcUrl: process.env.TRON_FULL_NODE || "https://api.trongrid.io",
+    explorerUrl: "https://tronscan.org",
+    minDeposit: 1,
+    withdrawalFee: 1,
+    usdtContract: process.env.TRON_USDT_CONTRACT || "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t",
+    icon: "\u20AE",
+    color: "text-red-500",
+    bg: "bg-red-500/10",
+    recommended: true
+  },
+  ethereum: {
+    id: "ethereum",
+    name: "Ethereum",
+    symbol: "ETH",
+    token: "USDT ERC-20",
+    coinType: 60,
+    confirmations: 12,
+    rpcUrl: process.env.ETH_RPC_URL || "https://eth.llamarpc.com",
+    explorerUrl: "https://etherscan.io",
+    minDeposit: 10,
+    withdrawalFee: 5,
+    usdtContract: process.env.ETH_USDT_CONTRACT || "0xdAC17F958D2ee523a2206206994597C13D831ec7",
+    icon: "\u039E",
+    color: "text-blue-400",
+    bg: "bg-blue-400/10"
+  },
+  bsc: {
+    id: "bsc",
+    name: "BSC",
+    symbol: "BNB",
+    token: "USDT BEP-20",
+    coinType: 60,
+    confirmations: 15,
+    rpcUrl: process.env.BSC_RPC_URL || "https://bsc-dataseed1.binance.org",
+    explorerUrl: "https://bscscan.com",
+    minDeposit: 1,
+    withdrawalFee: 0.5,
+    usdtContract: process.env.BSC_USDT_CONTRACT || "0x55d398326f99059fF775485246999027B3197955",
+    icon: "\u25C6",
+    color: "text-yellow-500",
+    bg: "bg-yellow-500/10"
+  },
+  polygon: {
+    id: "polygon",
+    name: "Polygon",
+    symbol: "POL",
+    token: "USDT",
+    coinType: 60,
+    confirmations: 128,
+    rpcUrl: process.env.POLYGON_RPC_URL || "https://polygon-rpc.com",
+    explorerUrl: "https://polygonscan.com",
+    minDeposit: 1,
+    withdrawalFee: 0.5,
+    usdtContract: process.env.POLYGON_USDT_CONTRACT || "0xc2132D05D31c914a87C6611C10748AEb04B58e8F",
+    icon: "\u2B21",
+    color: "text-purple-500",
+    bg: "bg-purple-500/10"
+  },
+  solana: {
+    id: "solana",
+    name: "Solana",
+    symbol: "SOL",
+    token: "USDT SPL",
+    coinType: 501,
+    confirmations: 32,
+    rpcUrl: process.env.SOLANA_RPC_URL || "https://api.mainnet-beta.solana.com",
+    explorerUrl: "https://explorer.solana.com",
+    minDeposit: 1,
+    withdrawalFee: 0.5,
+    usdtContract: process.env.SOLANA_USDT_MINT || "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB",
+    icon: "\u25CE",
+    color: "text-green-400",
+    bg: "bg-green-400/10"
+  },
+  bitcoin: {
+    id: "bitcoin",
+    name: "Bitcoin",
+    symbol: "BTC",
+    token: "BTC",
+    coinType: 0,
+    confirmations: 6,
+    rpcUrl: "",
+    explorerUrl: "https://blockstream.info",
+    minDeposit: 1e-4,
+    withdrawalFee: 1e-4,
+    icon: "\u20BF",
+    color: "text-orange-500",
+    bg: "bg-orange-500/10"
+  }
+};
+var NETWORK_IDS = Object.keys(NETWORKS);
+function getAutoApproveLimit() {
+  return parseFloat(process.env.AUTO_APPROVE_LIMIT || "100");
+}
+var WITHDRAWAL_LIMITS = {
+  perTransaction: 5e3,
+  // Max single withdrawal (USDT)
+  dailyTotal: 1e4
+  // Max daily total (USDT)
+};
+
+// server/lib/wallet/networks/tron.ts
+function getTronWeb() {
+  const TronWeb = __require("tronweb").default;
+  const config = NETWORKS.tron;
+  return new TronWeb({
+    fullHost: config.rpcUrl,
+    headers: process.env.TRON_API_KEY ? { "TRON-PRO-API-KEY": process.env.TRON_API_KEY } : void 0
+  });
+}
+async function getTronBalance(address) {
+  const tronWeb = getTronWeb();
+  const config = NETWORKS.tron;
+  const trxBalance = await tronWeb.trx.getBalance(address);
+  const trx = trxBalance / 1e6;
+  let usdt = 0;
+  if (config.usdtContract) {
+    try {
+      const contract = await tronWeb.contract().at(config.usdtContract);
+      const result = await contract.balanceOf(address).call();
+      usdt = Number(result) / 1e6;
+    } catch (err) {
+      console.error("[TRON] Failed to get USDT balance:", err);
+    }
+  }
+  return { trx, usdt };
+}
+async function sendTRC20(privateKey, toAddress, amount) {
+  const TronWeb = __require("tronweb").default;
+  const config = NETWORKS.tron;
+  const tronWeb = new TronWeb({
+    fullHost: config.rpcUrl,
+    privateKey,
+    headers: process.env.TRON_API_KEY ? { "TRON-PRO-API-KEY": process.env.TRON_API_KEY } : void 0
+  });
+  if (!config.usdtContract) throw new Error("TRON USDT contract not configured");
+  const contract = await tronWeb.contract().at(config.usdtContract);
+  const amountInSun = Math.floor(amount * 1e6);
+  const result = await contract.transfer(toAddress, amountInSun).send();
+  return result;
+}
+
+// server/lib/wallet/networks/evm.ts
+var ERC20_ABI = [
+  "function balanceOf(address) view returns (uint256)",
+  "function transfer(address to, uint256 amount) returns (bool)",
+  "function decimals() view returns (uint8)",
+  "event Transfer(address indexed from, address indexed to, uint256 value)"
+];
+async function getProvider(networkId) {
+  const { ethers } = await import("ethers");
+  const config = NETWORKS[networkId];
+  return new ethers.JsonRpcProvider(config.rpcUrl);
+}
+async function getEvmBalance(networkId, address) {
+  const { ethers } = await import("ethers");
+  const provider = await getProvider(networkId);
+  const config = NETWORKS[networkId];
+  const nativeBal = await provider.getBalance(address);
+  const native = parseFloat(ethers.formatEther(nativeBal));
+  let usdt = 0;
+  if (config.usdtContract) {
+    try {
+      const contract = new ethers.Contract(config.usdtContract, ERC20_ABI, provider);
+      const decimals = await contract.decimals();
+      const balance = await contract.balanceOf(address);
+      usdt = parseFloat(ethers.formatUnits(balance, decimals));
+    } catch (err) {
+      console.error(`[${networkId.toUpperCase()}] Failed to get USDT balance:`, err);
+    }
+  }
+  return { native, usdt };
+}
+async function sendERC20(networkId, privateKey, toAddress, amount) {
+  const { ethers } = await import("ethers");
+  const provider = await getProvider(networkId);
+  const config = NETWORKS[networkId];
+  if (!config.usdtContract) throw new Error(`${networkId} USDT contract not configured`);
+  const wallet = new ethers.Wallet(privateKey, provider);
+  const contract = new ethers.Contract(config.usdtContract, ERC20_ABI, wallet);
+  const decimals = await contract.decimals();
+  const amountInUnits = ethers.parseUnits(amount.toString(), decimals);
+  const tx = await contract.transfer(toAddress, amountInUnits);
+  const receipt = await tx.wait();
+  return receipt.hash;
+}
+
+// server/lib/wallet/networks/bitcoin.ts
+var BLOCKSTREAM_BASE = "https://blockstream.info/api";
+async function getBtcBalance(address) {
+  try {
+    const res = await fetch(`${BLOCKSTREAM_BASE}/address/${address}`);
+    if (!res.ok) throw new Error(`Blockstream API error: ${res.status}`);
+    const data = await res.json();
+    const confirmed = (data.chain_stats.funded_txo_sum - data.chain_stats.spent_txo_sum) / 1e8;
+    const unconfirmed = (data.mempool_stats.funded_txo_sum - data.mempool_stats.spent_txo_sum) / 1e8;
+    return { confirmed, unconfirmed, total: confirmed + unconfirmed };
+  } catch (err) {
+    console.error("[BTC] Failed to get balance:", err);
+    return { confirmed: 0, unconfirmed: 0, total: 0 };
+  }
+}
+async function sendBtc(userIndex, toAddress, amountBtc) {
+  const bitcoin = await import("bitcoinjs-lib");
+  const ecc = await import("tiny-secp256k1");
+  const { BIP32Factory } = await import("bip32");
+  const bip392 = await import("bip39");
+  const bip32 = BIP32Factory(ecc);
+  const mnemonic = process.env.WALLET_MNEMONIC;
+  if (!mnemonic) throw new Error("WALLET_MNEMONIC not set");
+  const seed = await bip392.mnemonicToSeed(mnemonic);
+  const root = bip32.fromSeed(seed, bitcoin.networks.bitcoin);
+  const path = `m/44'/0'/${userIndex}'/0/0`;
+  const child = root.derivePath(path);
+  const { address: fromAddress } = bitcoin.payments.p2wpkh({
+    pubkey: Buffer.from(child.publicKey),
+    network: bitcoin.networks.bitcoin
+  });
+  if (!fromAddress) throw new Error("Failed to derive source address");
+  const utxoRes = await fetch(`${BLOCKSTREAM_BASE}/address/${fromAddress}/utxo`);
+  const utxos = await utxoRes.json();
+  if (!utxos.length) throw new Error("No UTXOs available");
+  const amountSats = Math.floor(amountBtc * 1e8);
+  const feeSats = 5e3;
+  let inputSum = 0;
+  const selectedUtxos = [];
+  for (const utxo of utxos) {
+    selectedUtxos.push(utxo);
+    inputSum += utxo.value;
+    if (inputSum >= amountSats + feeSats) break;
+  }
+  if (inputSum < amountSats + feeSats) throw new Error("Insufficient BTC balance");
+  const psbt = new bitcoin.Psbt({ network: bitcoin.networks.bitcoin });
+  for (const utxo of selectedUtxos) {
+    const txHexRes = await fetch(`${BLOCKSTREAM_BASE}/tx/${utxo.txid}/hex`);
+    const txHex2 = await txHexRes.text();
+    psbt.addInput({
+      hash: utxo.txid,
+      index: utxo.vout,
+      witnessUtxo: {
+        script: bitcoin.payments.p2wpkh({
+          pubkey: Buffer.from(child.publicKey),
+          network: bitcoin.networks.bitcoin
+        }).output,
+        value: BigInt(utxo.value)
+      }
+    });
+  }
+  psbt.addOutput({ address: toAddress, value: BigInt(amountSats) });
+  const change = inputSum - amountSats - feeSats;
+  if (change > 546) {
+    psbt.addOutput({ address: fromAddress, value: BigInt(change) });
+  }
+  for (let i = 0; i < selectedUtxos.length; i++) {
+    psbt.signInput(i, {
+      publicKey: Buffer.from(child.publicKey),
+      privateKey: Buffer.from(child.privateKey),
+      sign: (hash) => {
+        return Buffer.from(ecc.sign(hash, child.privateKey));
+      }
+    });
+  }
+  psbt.finalizeAllInputs();
+  const txHex = psbt.extractTransaction().toHex();
+  const broadcastRes = await fetch(`${BLOCKSTREAM_BASE}/tx`, {
+    method: "POST",
+    body: txHex
+  });
+  if (!broadcastRes.ok) {
+    const errText = await broadcastRes.text();
+    throw new Error(`Broadcast failed: ${errText}`);
+  }
+  return await broadcastRes.text();
+}
+
+// server/lib/wallet/networks/solana.ts
+async function getConnection() {
+  const { Connection } = await import("@solana/web3.js");
+  return new Connection(NETWORKS.solana.rpcUrl, "confirmed");
+}
+async function getSolBalance(address) {
+  const { PublicKey } = await import("@solana/web3.js");
+  const connection = await getConnection();
+  let sol = 0;
+  let usdt = 0;
+  try {
+    const pubkey = new PublicKey(address);
+    const lamports = await connection.getBalance(pubkey);
+    sol = lamports / 1e9;
+    const mintAddress = NETWORKS.solana.usdtContract;
+    if (mintAddress) {
+      const mint = new PublicKey(mintAddress);
+      const tokenAccounts = await connection.getTokenAccountsByOwner(pubkey, { mint });
+      for (const { account } of tokenAccounts.value) {
+        const data = account.data;
+        const amount = data.readBigUInt64LE(64);
+        usdt += Number(amount) / 1e6;
+      }
+    }
+  } catch (err) {
+    console.error("[SOL] Failed to get balance:", err);
+  }
+  return { sol, usdt };
+}
+async function sendSplToken(keypairBytes, toAddress, mintAddress, amount) {
+  const {
+    PublicKey,
+    Keypair,
+    Transaction,
+    SystemProgram
+  } = await import("@solana/web3.js");
+  const connection = await getConnection();
+  const fromKeypair = Keypair.fromSecretKey(keypairBytes);
+  const toPubkey = new PublicKey(toAddress);
+  const mint = new PublicKey(mintAddress);
+  const amountInDecimals = Math.floor(amount * 1e6);
+  const transaction = new Transaction();
+  transaction.add(
+    SystemProgram.transfer({
+      fromPubkey: fromKeypair.publicKey,
+      toPubkey,
+      lamports: Math.floor(amount * 1e9)
+    })
+  );
+  const signature = await connection.sendTransaction(transaction, [fromKeypair]);
+  await connection.confirmTransaction(signature, "confirmed");
+  return signature;
+}
+
+// server/lib/wallet/hotWallet.ts
+function getHotWalletAddress(network) {
+  switch (network) {
+    case "tron":
+      return process.env.HOT_WALLET_TRON || "";
+    case "ethereum":
+    case "bsc":
+    case "polygon":
+      return process.env.HOT_WALLET_EVM || "";
+    case "solana":
+      return process.env.HOT_WALLET_SOLANA || "";
+    case "bitcoin":
+      return process.env.HOT_WALLET_BITCOIN || "";
+  }
+}
+async function getAllDepositBalances() {
+  const results = [];
+  const networks = ["tron", "ethereum", "bsc", "polygon", "solana", "bitcoin"];
+  for (const network of networks) {
+    const wallets2 = await getActiveDepositAddresses(network);
+    for (const wallet of wallets2) {
+      try {
+        let balance = 0;
+        let nativeBalance;
+        switch (network) {
+          case "tron": {
+            const bal = await getTronBalance(wallet.depositAddress);
+            balance = bal.usdt;
+            nativeBalance = bal.trx;
+            break;
+          }
+          case "ethereum":
+          case "bsc":
+          case "polygon": {
+            const bal = await getEvmBalance(network, wallet.depositAddress);
+            balance = bal.usdt;
+            nativeBalance = bal.native;
+            break;
+          }
+          case "solana": {
+            const bal = await getSolBalance(wallet.depositAddress);
+            balance = bal.usdt;
+            nativeBalance = bal.sol;
+            break;
+          }
+          case "bitcoin": {
+            const bal = await getBtcBalance(wallet.depositAddress);
+            balance = bal.total;
+            break;
+          }
+        }
+        results.push({
+          walletId: wallet.id,
+          userId: wallet.userId,
+          network,
+          address: wallet.depositAddress,
+          addressIndex: wallet.addressIndex,
+          balance,
+          nativeBalance
+        });
+      } catch (err) {
+        console.error(`[HotWallet] Failed to get balance for ${wallet.depositAddress}:`, err);
+      }
+    }
+  }
+  return results;
+}
+async function sweepWallet(network, walletId, address, addressIndex, amount) {
+  const hotWallet = getHotWalletAddress(network);
+  if (!hotWallet) {
+    return { walletId, network, address, amount, error: "Hot wallet adresi ayarlanmam\u0131\u015F" };
+  }
+  try {
+    let txHash;
+    switch (network) {
+      case "tron": {
+        const privateKey = await getPrivateKey("tron", addressIndex);
+        txHash = await sendTRC20(privateKey, hotWallet, amount);
+        break;
+      }
+      case "ethereum":
+      case "bsc":
+      case "polygon": {
+        const privateKey = await getPrivateKey(network, addressIndex);
+        txHash = await sendERC20(network, privateKey, hotWallet, amount);
+        break;
+      }
+      case "solana": {
+        const keypair = await getPrivateKey("solana", addressIndex);
+        const mint = NETWORKS.solana.usdtContract;
+        if (!mint) throw new Error("Solana USDT mint adresi ayarlanmam\u0131\u015F");
+        txHash = await sendSplToken(keypair.secretKey, hotWallet, mint, amount);
+        break;
+      }
+      case "bitcoin": {
+        txHash = await sendBtc(addressIndex, hotWallet, amount);
+        break;
+      }
+      default:
+        return { walletId, network, address, amount, error: "Desteklenmeyen a\u011F" };
+    }
+    return { walletId, network, address, amount, txHash };
+  } catch (err) {
+    return { walletId, network, address, amount, error: err.message || "Sweep ba\u015Far\u0131s\u0131z" };
+  }
+}
+async function sweepAll() {
+  const balances2 = await getAllDepositBalances();
+  const results = [];
+  let totalSwept = 0;
+  for (const wallet of balances2) {
+    if (wallet.balance <= 0) continue;
+    const result = await sweepWallet(
+      wallet.network,
+      wallet.walletId,
+      wallet.address,
+      wallet.addressIndex,
+      wallet.balance
+    );
+    results.push(result);
+    if (result.txHash) {
+      totalSwept += wallet.balance;
+    }
+  }
+  return { results, totalSwept };
+}
+async function getHotWalletBalances() {
+  const results = [];
+  const networks = ["tron", "ethereum", "bsc", "polygon", "solana", "bitcoin"];
+  for (const network of networks) {
+    const address = getHotWalletAddress(network);
+    if (!address) continue;
+    try {
+      let balance = 0;
+      let nativeBalance;
+      switch (network) {
+        case "tron": {
+          const bal = await getTronBalance(address);
+          balance = bal.usdt;
+          nativeBalance = bal.trx;
+          break;
+        }
+        case "ethereum":
+        case "bsc":
+        case "polygon": {
+          const bal = await getEvmBalance(network, address);
+          balance = bal.usdt;
+          nativeBalance = bal.native;
+          break;
+        }
+        case "solana": {
+          const bal = await getSolBalance(address);
+          balance = bal.usdt;
+          nativeBalance = bal.sol;
+          break;
+        }
+        case "bitcoin": {
+          const bal = await getBtcBalance(address);
+          balance = bal.total;
+          break;
+        }
+      }
+      results.push({ network, address, balance, nativeBalance });
+    } catch (err) {
+      console.error(`[HotWallet] Failed to get hot wallet balance for ${network}:`, err);
+    }
+  }
+  return results;
 }
 
 // server/settlement.ts
@@ -2774,6 +3602,110 @@ var appRouter = router({
       return getActiveBanners("casino");
     })
   }),
+  // ─── Crypto Wallet ───
+  cryptoWallet: router({
+    getDepositAddress: protectedProcedure.input(z2.object({ network: z2.enum(["tron", "ethereum", "bsc", "polygon", "solana", "bitcoin"]) })).mutation(async ({ ctx, input }) => {
+      const network = input.network;
+      const existing = await getUserWallet(ctx.user.id, network);
+      if (existing) {
+        return {
+          address: existing.depositAddress,
+          network: existing.network,
+          isNew: false
+        };
+      }
+      const addressIndex = await getNextAddressIndex();
+      const { address } = await generateAddress(network, addressIndex);
+      await createWallet(ctx.user.id, network, addressIndex, address);
+      return { address, network, isNew: true };
+    }),
+    getAddresses: protectedProcedure.query(async ({ ctx }) => {
+      return getUserWallets(ctx.user.id);
+    }),
+    regenerateAddress: protectedProcedure.input(z2.object({ network: z2.enum(["tron", "ethereum", "bsc", "polygon", "solana", "bitcoin"]) })).mutation(async ({ ctx, input }) => {
+      const network = input.network;
+      const existing = await getUserWallet(ctx.user.id, network);
+      if (!existing) {
+        throw new Error("Bu a\u011Fda hen\xFCz bir adresiniz yok. \xD6nce adres olu\u015Fturun.");
+      }
+      const newAddressIndex = await getNextAddressIndex();
+      const { address } = await generateAddress(network, newAddressIndex);
+      await updateWalletAddress(existing.id, newAddressIndex, address);
+      return { address, network, oldAddress: existing.depositAddress };
+    }),
+    deposits: protectedProcedure.query(async ({ ctx }) => {
+      return getUserCryptoDeposits(ctx.user.id);
+    }),
+    withdrawals: protectedProcedure.query(async ({ ctx }) => {
+      return getUserWithdrawals(ctx.user.id);
+    }),
+    requestWithdrawal: protectedProcedure.input(z2.object({
+      network: z2.enum(["tron", "ethereum", "bsc", "polygon", "solana", "bitcoin"]),
+      toAddress: z2.string().min(10).max(128),
+      amount: z2.number().min(1).max(WITHDRAWAL_LIMITS.perTransaction)
+    })).mutation(async ({ ctx, input }) => {
+      const network = input.network;
+      const config = NETWORKS[network];
+      if (input.amount > WITHDRAWAL_LIMITS.perTransaction) {
+        throw new Error(`Tek seferde maksimum ${WITHDRAWAL_LIMITS.perTransaction} USDT \xE7ekilebilir`);
+      }
+      const dailyTotal = await getUserDailyWithdrawalTotal(ctx.user.id);
+      if (dailyTotal + input.amount > WITHDRAWAL_LIMITS.dailyTotal) {
+        const remaining = Math.max(0, WITHDRAWAL_LIMITS.dailyTotal - dailyTotal);
+        throw new Error(`G\xFCnl\xFCk \xE7ekim limiti: ${WITHDRAWAL_LIMITS.dailyTotal} USDT. Kalan: ${remaining.toFixed(2)} USDT`);
+      }
+      const addrValidators = {
+        tron: /^T[A-HJ-NP-Za-km-z1-9]{33}$/,
+        ethereum: /^0x[a-fA-F0-9]{40}$/,
+        bsc: /^0x[a-fA-F0-9]{40}$/,
+        polygon: /^0x[a-fA-F0-9]{40}$/,
+        solana: /^[1-9A-HJ-NP-Za-km-z]{32,44}$/,
+        bitcoin: /^(bc1|tb1|[13]|[mn2])[a-zA-HJ-NP-Z0-9]{25,62}$/
+      };
+      if (addrValidators[network] && !addrValidators[network].test(input.toAddress)) {
+        throw new Error(`Ge\xE7ersiz ${config.name} adresi`);
+      }
+      const totalCost = input.amount + config.withdrawalFee;
+      await getOrCreateBalance(ctx.user.id);
+      const deduct = await atomicDeductBalance(
+        ctx.user.id,
+        totalCost,
+        `Kripto \xE7ekim talebi: ${input.amount} USDT (${config.name}) + ${config.withdrawalFee} fee`
+      );
+      if (!deduct.success) {
+        throw new Error(deduct.error || "Yetersiz bakiye");
+      }
+      const withdrawalId = await createWithdrawal({
+        userId: ctx.user.id,
+        network,
+        toAddress: input.toAddress,
+        amount: input.amount.toFixed(2),
+        fee: config.withdrawalFee.toFixed(2),
+        tokenSymbol: "USDT"
+      });
+      const autoLimit = getAutoApproveLimit();
+      if (input.amount <= autoLimit) {
+        await updateWithdrawalStatus(withdrawalId, "approved");
+      }
+      return { withdrawalId, status: input.amount <= autoLimit ? "approved" : "pending" };
+    }),
+    networks: publicProcedure.query(() => {
+      return Object.values(NETWORKS).map((n) => ({
+        id: n.id,
+        name: n.name,
+        symbol: n.symbol,
+        token: n.token,
+        minDeposit: n.minDeposit,
+        withdrawalFee: n.withdrawalFee,
+        confirmations: n.confirmations,
+        icon: n.icon,
+        color: n.color,
+        bg: n.bg,
+        recommended: n.recommended || false,
+        explorerUrl: n.explorerUrl
+      }));
+    })
+  }),
   // ─── Admin ───
   admin: router({
     users: adminProcedure.query(async () => {
@@ -2848,6 +3780,49 @@ var appRouter = router({
     }),
     bannerReorder: adminProcedure.input(z2.object({ orderedIds: z2.array(z2.number()).min(1) })).mutation(async ({ input }) => {
       await reorderBanners(input.orderedIds);
+      return { success: true };
+    }),
+    // ─── Crypto Admin ───
+    cryptoDeposits: adminProcedure.query(async () => {
+      return getAllCryptoDeposits();
+    }),
+    cryptoWithdrawals: adminProcedure.query(async () => {
+      return getAllWithdrawals();
+    }),
+    pendingWithdrawals: adminProcedure.query(async () => {
+      return getPendingWithdrawals();
+    }),
+    approveWithdrawal: adminProcedure.input(z2.object({ id: z2.number() })).mutation(async ({ ctx, input }) => {
+      const withdrawal = await getWithdrawalById(input.id);
+      if (!withdrawal) throw new Error("\xC7ekim bulunamad\u0131");
+      if (withdrawal.status !== "pending") throw new Error("Bu \xE7ekim zaten i\u015Flendi");
+      await updateWithdrawalStatus(input.id, "approved", void 0, ctx.user.id);
+      return { success: true };
+    }),
+    // ─── Hot Wallet & Sweep ───
+    hotWalletBalances: adminProcedure.query(async () => {
+      return getHotWalletBalances();
+    }),
+    depositWalletBalances: adminProcedure.query(async () => {
+      return getAllDepositBalances();
+    }),
+    sweepAll: adminProcedure.mutation(async () => {
+      return sweepAll();
+    }),
+    rejectWithdrawal: adminProcedure.input(z2.object({ id: z2.number(), note: z2.string().optional() })).mutation(async ({ ctx, input }) => {
+      const withdrawal = await getWithdrawalById(input.id);
+      if (!withdrawal) throw new Error("\xC7ekim bulunamad\u0131");
+      if (withdrawal.status !== "pending") throw new Error("Bu \xE7ekim zaten i\u015Flendi");
+      const refundAmount = parseFloat(withdrawal.amount) + parseFloat(withdrawal.fee);
+      await getOrCreateBalance(withdrawal.userId);
+      await updateBalance(withdrawal.userId, refundAmount.toFixed(2));
+      await addTransaction(
+        withdrawal.userId,
+        "deposit",
+        refundAmount.toFixed(2),
+        `\xC7ekim reddedildi \u2014 iade: ${withdrawal.amount} USDT + ${withdrawal.fee} fee`
+      );
+      await updateWithdrawalStatus(input.id, "rejected", void 0, ctx.user.id, input.note);
       return { success: true };
     })
   })
