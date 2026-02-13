@@ -1,4 +1,3 @@
-import "dotenv/config";
 import express from "express";
 import { registerOAuthRoutes } from "../_core/oauth";
 

@@ -5,6 +5,9 @@
 # Build outputs
 dist/
 build/
+api/trpc/
+api/oauth/
+api/cron/*.js
 *.dist
 
 # Environment variables

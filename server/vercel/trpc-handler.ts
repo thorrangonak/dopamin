@@ -1,4 +1,3 @@
-import "dotenv/config";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import express from "express";
 import { appRouter } from "../routers";
