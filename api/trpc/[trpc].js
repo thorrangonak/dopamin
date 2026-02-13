@@ -315,6 +315,13 @@ var banners = mysqlTable("banners", {
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull()
 });
+var chatMessages = mysqlTable("chat_messages", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  role: mysqlEnum("role", ["user", "assistant"]).notNull(),
+  content: text("content").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull()
+});
 
 // server/db.ts
 var _db = null;
@@ -720,6 +727,21 @@ async function reorderBanners(orderedIds) {
   for (let i = 0; i < orderedIds.length; i++) {
     await db.update(banners).set({ sortOrder: i + 1 }).where(eq(banners.id, orderedIds[i]));
   }
+}
+async function getChatHistory(userId, limit = 50) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(chatMessages).where(eq(chatMessages.userId, userId)).orderBy(desc(chatMessages.createdAt)).limit(limit);
+}
+async function addChatMessage(userId, role, content) {
+  const db = await getDb();
+  if (!db) return;
+  await db.insert(chatMessages).values({ userId, role, content });
+}
+async function clearChatHistory(userId) {
+  const db = await getDb();
+  if (!db) return;
+  await db.delete(chatMessages).where(eq(chatMessages.userId, userId));
 }
 
 // server/_core/sdk.ts
@@ -1825,19 +1847,71 @@ var appRouter = router({
   }),
   // ─── LLM Assistant ───
   assistant: router({
-    ask: protectedProcedure.input(z2.object({ message: z2.string().min(1).max(2e3) })).mutation(async ({ input }) => {
-      const response = await invokeLLM({
-        messages: [
-          {
-            role: "system",
-            content: `Sen Dopamin bahis platformunun yapay zeka asistan\u0131s\u0131n. Kullan\u0131c\u0131lara spor bahisleri hakk\u0131nda bilgi ver, analiz yap ve \xF6nerilerde bulun. T\xFCrk\xE7e yan\u0131t ver. Bahis stratejileri, tak\u0131m analizleri ve istatistikler hakk\u0131nda yard\u0131mc\u0131 ol. Sorumlu bahis oynamay\u0131 her zaman hat\u0131rlat.`
-          },
-          { role: "user", content: input.message }
-        ]
-      });
-      return {
-        reply: response.choices?.[0]?.message?.content ?? "Yan\u0131t olu\u015Fturulamad\u0131."
-      };
+    chat: protectedProcedure.input(z2.object({ message: z2.string().min(1).max(2e3) })).mutation(async ({ ctx, input }) => {
+      await addChatMessage(ctx.user.id, "user", input.message);
+      const history = await getChatHistory(ctx.user.id, 20);
+      const historyMessages = history.reverse().slice(0, -1).map((m) => ({ role: m.role, content: m.content }));
+      const systemPrompt = `Sen "Dopamin" bahis ve casino platformunun resmi AI asistan\u0131s\u0131n. Ad\u0131n "Dopamin AI". Kullan\u0131c\u0131ya her konuda yard\u0131mc\u0131 ol. T\xFCrk\xE7e yan\u0131t ver. K\u0131sa ve net cevaplar ver.
+
+## Platform Hakk\u0131nda
+- Dopamin, spor bahisleri ve casino oyunlar\u0131 sunan bir platformdur.
+- Para birimi USDT bazl\u0131d\u0131r. Kullan\u0131c\u0131lar farkl\u0131 fiat para birimlerinde bakiyelerini g\xF6rebilir (USD, EUR, TRY, vb.) ama dahili bakiye her zaman USDT'dir.
+- Minimum bahis: 1 USDT, Minimum yat\u0131r\u0131m: 1 USDT.
+
+## Spor Bahisleri
+- Futbol, basketbol, tenis, Amerikan futbolu, buz hokeyi, beyzbol, MMA, boks, kriket, e-spor dahil bir\xE7ok spor dal\u0131 mevcuttur.
+- Bahis t\xFCrleri: Ma\xE7 Sonucu (1X2/H2H), Handikap (Spreads), Alt/\xDCst (Totals).
+- Tekli ve kombine kuponlar olu\u015Fturulabilir.
+- Canl\u0131 skorlar ve canl\u0131 bahis imkan\u0131 vard\u0131r.
+- Kuponlar "Kuponlar\u0131m" sayfas\u0131ndan takip edilebilir.
+
+## Casino Oyunlar\u0131
+- **Coin Flip**: Yaz\u0131-tura. 2x \xE7arpan. %50 kazanma \u015Fans\u0131.
+- **Dice (Zar)**: 1-100 aras\u0131 zar atma. Hedef belirlenir, alt\u0131nda veya \xFCst\xFCnde kazan\u0131l\u0131r. \xC7arpan hedefe g\xF6re de\u011Fi\u015Fir.
+- **Mines (May\u0131nlar)**: 5x5 \u0131zgara, gizli may\u0131nlar. Her g\xFCvenli kareyi a\xE7t\u0131k\xE7a \xE7arpan artar. May\u0131na basarsan kaybedersin. May\u0131n say\u0131s\u0131 se\xE7ilebilir (1-24). Ne kadar \xE7ok may\u0131n, o kadar y\xFCksek \xE7arpan.
+- **Crash**: \xC7arpan 1x'ten yukar\u0131 \xE7\u0131kar. U\xE7ak d\xFC\u015Fmeden "Cash Out" yapmal\u0131s\u0131n. Ne kadar ge\xE7 \xE7ekersin, o kadar \xE7ok kazan\u0131rs\u0131n ama u\xE7ak d\xFC\u015Ferse her \u015Feyi kaybedersin.
+- **Roulette (Rulet)**: Avrupa ruleti (0-36). K\u0131rm\u0131z\u0131/Siyah, Tek/\xC7ift, d\xFCz numara bahisleri yap\u0131labilir.
+- **Plinko**: Toplar piramit \u015Feklindeki \xE7ivilerden d\xFC\u015Fer. Risk seviyesi (D\xFC\u015F\xFCk/Orta/Y\xFCksek) ve sat\u0131r say\u0131s\u0131 se\xE7ilebilir.
+
+## VIP Sistemi
+- Her 10 USDT bahis = 1 XP kazand\u0131r\u0131r.
+- Seviyeler: Bronze (0 XP), Silver (1000 XP), Gold (5000 XP), Platinum (15000 XP), Diamond (50000 XP), Elite (150000 XP).
+- Cashback oranlar\u0131: Bronze %0.5, Silver %1, Gold %2, Platinum %3.5, Diamond %5, Elite %8.
+- Bonus \xE7arpanlar\u0131 seviyeye g\xF6re artar.
+
+## C\xFCzdan & Hesap
+- C\xFCzdan sayfas\u0131ndan yat\u0131rma ve \xE7ekme i\u015Flemleri yap\u0131l\u0131r.
+- Kripto (USDT) ile yat\u0131r\u0131m/\xE7ekim desteklenir.
+- Profil sayfas\u0131nda istatistikler, bahis ge\xE7mi\u015Fi, kazan\xE7/kay\u0131p grafikleri g\xF6r\xFCn\xFCr.
+
+## Kurallar
+- 18 ya\u015F\u0131ndan b\xFCy\xFCk olman\u0131z gerekir.
+- Sorumlu bahis oynamay\u0131 her zaman hat\u0131rlat.
+- Bahis ba\u011F\u0131ml\u0131l\u0131\u011F\u0131 belirtileri g\xF6r\xFCrsen kullan\u0131c\u0131y\u0131 uyar ve profesyonel yard\u0131m almay\u0131 \xF6ner.
+- Garantili kazan\xE7 vaadi YAPMA. Bahis her zaman risk i\xE7erir.
+
+## \xD6nemli
+- Kullan\u0131c\u0131n\u0131n ad\u0131: ${ctx.user.name || "Kullan\u0131c\u0131"}
+- Her zaman nazik, yard\u0131msever ve profesyonel ol.
+- Rakip platformlar\u0131 k\xF6t\xFCleme.
+- Yasad\u0131\u015F\u0131 aktivitelere yard\u0131m etme.`;
+      const messages = [
+        { role: "system", content: systemPrompt },
+        ...historyMessages,
+        { role: "user", content: input.message }
+      ];
+      const response = await invokeLLM({ messages });
+      const reply = response.choices?.[0]?.message?.content ?? "Yan\u0131t olu\u015Fturulamad\u0131.";
+      await addChatMessage(ctx.user.id, "assistant", typeof reply === "string" ? reply : JSON.stringify(reply));
+      return { reply: typeof reply === "string" ? reply : JSON.stringify(reply) };
+    }),
+    history: protectedProcedure.query(async ({ ctx }) => {
+      const messages = await getChatHistory(ctx.user.id, 50);
+      return messages.reverse();
+    }),
+    clearHistory: protectedProcedure.mutation(async ({ ctx }) => {
+      await clearChatHistory(ctx.user.id);
+      return { success: true };
     })
   }),
   // ─── Casino Games ───

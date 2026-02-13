@@ -20,6 +20,7 @@ import { useTheme } from "@/contexts/ThemeContext";
 import { useCurrency } from "@/contexts/CurrencyContext";
 import CurrencySelector from "@/components/CurrencySelector";
 import DopaminLogo from "@/components/DopaminLogo";
+import ChatWidget from "@/components/ChatWidget";
 
 /* ─── Section Context ─── */
 type Section = "sports" | "casino";
@@ -801,6 +802,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         <MobileNav />
         <MobileBetSlip />
         <MobileSidebar open={mobileSidebarOpen} onClose={() => setMobileSidebarOpen(false)} />
+        <ChatWidget />
       </div>
     </SectionContext.Provider>
   );

@@ -1,6 +1,6 @@
 import { eq, desc, and, sql, inArray, asc, lte, gte, isNull, or } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
-import { InsertUser, users, balances, transactions, bets, betItems, sportsCache, eventsCache, casinoGames, vipProfiles, banners, type InsertBanner } from "../drizzle/schema";
+import { InsertUser, users, balances, transactions, bets, betItems, sportsCache, eventsCache, casinoGames, vipProfiles, banners, type InsertBanner, chatMessages } from "../drizzle/schema";
 import { ENV } from './_core/env';
 
 let _db: ReturnType<typeof drizzle> | null = null;
@@ -498,4 +498,27 @@ export async function reorderBanners(orderedIds: number[]) {
   for (let i = 0; i < orderedIds.length; i++) {
     await db.update(banners).set({ sortOrder: i + 1 }).where(eq(banners.id, orderedIds[i]));
   }
+}
+
+// ─── Chat Message Helpers ───
+
+export async function getChatHistory(userId: number, limit = 50) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(chatMessages)
+    .where(eq(chatMessages.userId, userId))
+    .orderBy(desc(chatMessages.createdAt))
+    .limit(limit);
+}
+
+export async function addChatMessage(userId: number, role: "user" | "assistant", content: string) {
+  const db = await getDb();
+  if (!db) return;
+  await db.insert(chatMessages).values({ userId, role, content });
+}
+
+export async function clearChatHistory(userId: number) {
+  const db = await getDb();
+  if (!db) return;
+  await db.delete(chatMessages).where(eq(chatMessages.userId, userId));
 }

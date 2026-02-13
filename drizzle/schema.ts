@@ -161,3 +161,14 @@ export const banners = mysqlTable("banners", {
 
 export type Banner = typeof banners.$inferSelect;
 export type InsertBanner = typeof banners.$inferInsert;
+
+// ─── Chat Messages (AI Assistant) ───
+export const chatMessages = mysqlTable("chat_messages", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  role: mysqlEnum("role", ["user", "assistant"]).notNull(),
+  content: text("content").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type ChatMessage = typeof chatMessages.$inferSelect;

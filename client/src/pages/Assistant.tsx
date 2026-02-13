@@ -13,18 +13,37 @@ interface Message {
 
 export default function Assistant() {
   const { isAuthenticated, loading } = useAuth();
-  const [messages, setMessages] = useState<Message[]>([
-    { role: "assistant", content: "Merhaba! Ben Dopamin AI Asistanı. Spor bahisleri hakkında sorularınızı yanıtlayabilir, takım analizleri yapabilir ve bahis önerilerinde bulunabilirim. Nasıl yardımcı olabilirim?" },
-  ]);
+  const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
+  const [historyLoaded, setHistoryLoaded] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  const askMut = trpc.assistant.ask.useMutation({
+  const historyQuery = trpc.assistant.history.useQuery(undefined, {
+    enabled: isAuthenticated && !historyLoaded,
+  });
+
+  useEffect(() => {
+    if (historyQuery.data && !historyLoaded) {
+      if (historyQuery.data.length > 0) {
+        setMessages(historyQuery.data.map(m => ({
+          role: m.role as "user" | "assistant",
+          content: m.content,
+        })));
+      } else {
+        setMessages([
+          { role: "assistant", content: "Merhaba! Ben Dopamin AI Asistani. Spor bahisleri hakkinda sorularinizi yanitlayabilir, takim analizleri yapabilir ve bahis onerilerinde bulunabilirim. Nasil yardimci olabilirim?" },
+        ]);
+      }
+      setHistoryLoaded(true);
+    }
+  }, [historyQuery.data, historyLoaded]);
+
+  const askMut = trpc.assistant.chat.useMutation({
     onSuccess: (data) => {
       setMessages(prev => [...prev, { role: "assistant" as const, content: String(data.reply) }]);
     },
     onError: () => {
-      setMessages(prev => [...prev, { role: "assistant", content: "Üzgünüm, bir hata oluştu. Lütfen tekrar deneyin." }]);
+      setMessages(prev => [...prev, { role: "assistant", content: "Uzgunum, bir hata olustu. Lutfen tekrar deneyin." }]);
     },
   });
 

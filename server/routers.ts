@@ -17,6 +17,7 @@ import {
   getOrCreateVipProfile, addVipXp, getAllVipProfiles, VIP_TIERS, getNextTier,
   getActiveBanners, getAllBanners, getBannerById, createBanner, updateBanner, deleteBanner, reorderBanners,
   upsertUser, getUserByEmail, getOrCreateBalance as ensureBalance,
+  getChatHistory, addChatMessage, clearChatHistory,
 } from "./db";
 import { settleBets } from "./settlement";
 import { calculateCasinoResult } from "./casinoEngine";
@@ -410,22 +411,88 @@ export const appRouter = router({
 
   // ─── LLM Assistant ───
   assistant: router({
-    ask: protectedProcedure
+    chat: protectedProcedure
       .input(z.object({ message: z.string().min(1).max(2000) }))
-      .mutation(async ({ input }) => {
-        const response = await invokeLLM({
-          messages: [
-            {
-              role: "system",
-              content: `Sen Dopamin bahis platformunun yapay zeka asistanısın. Kullanıcılara spor bahisleri hakkında bilgi ver, analiz yap ve önerilerde bulun. Türkçe yanıt ver. Bahis stratejileri, takım analizleri ve istatistikler hakkında yardımcı ol. Sorumlu bahis oynamayı her zaman hatırlat.`,
-            },
-            { role: "user", content: input.message },
-          ],
-        });
-        return {
-          reply: response.choices?.[0]?.message?.content ?? "Yanıt oluşturulamadı.",
-        };
+      .mutation(async ({ ctx, input }) => {
+        // Save user message
+        await addChatMessage(ctx.user.id, "user", input.message);
+
+        // Fetch recent history (last 20 messages for context)
+        const history = await getChatHistory(ctx.user.id, 20);
+        const historyMessages = history
+          .reverse()
+          .slice(0, -1) // exclude the message we just added (it's in input)
+          .map(m => ({ role: m.role as "user" | "assistant", content: m.content }));
+
+        const systemPrompt = `Sen "Dopamin" bahis ve casino platformunun resmi AI asistanısın. Adın "Dopamin AI". Kullanıcıya her konuda yardımcı ol. Türkçe yanıt ver. Kısa ve net cevaplar ver.
+
+## Platform Hakkında
+- Dopamin, spor bahisleri ve casino oyunları sunan bir platformdur.
+- Para birimi USDT bazlıdır. Kullanıcılar farklı fiat para birimlerinde bakiyelerini görebilir (USD, EUR, TRY, vb.) ama dahili bakiye her zaman USDT'dir.
+- Minimum bahis: 1 USDT, Minimum yatırım: 1 USDT.
+
+## Spor Bahisleri
+- Futbol, basketbol, tenis, Amerikan futbolu, buz hokeyi, beyzbol, MMA, boks, kriket, e-spor dahil birçok spor dalı mevcuttur.
+- Bahis türleri: Maç Sonucu (1X2/H2H), Handikap (Spreads), Alt/Üst (Totals).
+- Tekli ve kombine kuponlar oluşturulabilir.
+- Canlı skorlar ve canlı bahis imkanı vardır.
+- Kuponlar "Kuponlarım" sayfasından takip edilebilir.
+
+## Casino Oyunları
+- **Coin Flip**: Yazı-tura. 2x çarpan. %50 kazanma şansı.
+- **Dice (Zar)**: 1-100 arası zar atma. Hedef belirlenir, altında veya üstünde kazanılır. Çarpan hedefe göre değişir.
+- **Mines (Mayınlar)**: 5x5 ızgara, gizli mayınlar. Her güvenli kareyi açtıkça çarpan artar. Mayına basarsan kaybedersin. Mayın sayısı seçilebilir (1-24). Ne kadar çok mayın, o kadar yüksek çarpan.
+- **Crash**: Çarpan 1x'ten yukarı çıkar. Uçak düşmeden "Cash Out" yapmalısın. Ne kadar geç çekersin, o kadar çok kazanırsın ama uçak düşerse her şeyi kaybedersin.
+- **Roulette (Rulet)**: Avrupa ruleti (0-36). Kırmızı/Siyah, Tek/Çift, düz numara bahisleri yapılabilir.
+- **Plinko**: Toplar piramit şeklindeki çivilerden düşer. Risk seviyesi (Düşük/Orta/Yüksek) ve satır sayısı seçilebilir.
+
+## VIP Sistemi
+- Her 10 USDT bahis = 1 XP kazandırır.
+- Seviyeler: Bronze (0 XP), Silver (1000 XP), Gold (5000 XP), Platinum (15000 XP), Diamond (50000 XP), Elite (150000 XP).
+- Cashback oranları: Bronze %0.5, Silver %1, Gold %2, Platinum %3.5, Diamond %5, Elite %8.
+- Bonus çarpanları seviyeye göre artar.
+
+## Cüzdan & Hesap
+- Cüzdan sayfasından yatırma ve çekme işlemleri yapılır.
+- Kripto (USDT) ile yatırım/çekim desteklenir.
+- Profil sayfasında istatistikler, bahis geçmişi, kazanç/kayıp grafikleri görünür.
+
+## Kurallar
+- 18 yaşından büyük olmanız gerekir.
+- Sorumlu bahis oynamayı her zaman hatırlat.
+- Bahis bağımlılığı belirtileri görürsen kullanıcıyı uyar ve profesyonel yardım almayı öner.
+- Garantili kazanç vaadi YAPMA. Bahis her zaman risk içerir.
+
+## Önemli
+- Kullanıcının adı: ${ctx.user.name || "Kullanıcı"}
+- Her zaman nazik, yardımsever ve profesyonel ol.
+- Rakip platformları kötüleme.
+- Yasadışı aktivitelere yardım etme.`;
+
+        const messages = [
+          { role: "system" as const, content: systemPrompt },
+          ...historyMessages,
+          { role: "user" as const, content: input.message },
+        ];
+
+        const response = await invokeLLM({ messages });
+        const reply = response.choices?.[0]?.message?.content ?? "Yanıt oluşturulamadı.";
+
+        // Save assistant response
+        await addChatMessage(ctx.user.id, "assistant", typeof reply === "string" ? reply : JSON.stringify(reply));
+
+        return { reply: typeof reply === "string" ? reply : JSON.stringify(reply) };
       }),
+
+    history: protectedProcedure.query(async ({ ctx }) => {
+      const messages = await getChatHistory(ctx.user.id, 50);
+      return messages.reverse();
+    }),
+
+    clearHistory: protectedProcedure.mutation(async ({ ctx }) => {
+      await clearChatHistory(ctx.user.id);
+      return { success: true };
+    }),
   }),
 
   // ─── Casino Games ───
