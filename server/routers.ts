@@ -20,7 +20,7 @@ import {
   upsertUser, getUserByEmail, getOrCreateBalance as ensureBalance,
   getChatHistory, addChatMessage, clearChatHistory,
   // Crypto wallet
-  createWallet, getUserWallet, getUserWallets, getNextAddressIndex,
+  createWallet, getUserWallet, getUserWallets, getNextAddressIndex, updateWalletAddress,
   createCryptoDeposit, getUserCryptoDeposits, getAllCryptoDeposits,
   createWithdrawal, updateWithdrawalStatus, getWithdrawalById,
   getPendingWithdrawals, getUserWithdrawals, getAllWithdrawals,
@@ -730,6 +730,23 @@ export const appRouter = router({
     getAddresses: protectedProcedure.query(async ({ ctx }) => {
       return getUserWallets(ctx.user.id);
     }),
+
+    regenerateAddress: protectedProcedure
+      .input(z.object({ network: z.enum(["tron", "ethereum", "bsc", "polygon", "solana", "bitcoin"]) }))
+      .mutation(async ({ ctx, input }) => {
+        const network = input.network as NetworkId;
+        const existing = await getUserWallet(ctx.user.id, network);
+        if (!existing) {
+          throw new Error("Bu ağda henüz bir adresiniz yok. Önce adres oluşturun.");
+        }
+
+        const newAddressIndex = await getNextAddressIndex();
+        const { address } = await generateAddress(network, newAddressIndex);
+
+        await updateWalletAddress(existing.id, newAddressIndex, address);
+
+        return { address, network, oldAddress: existing.depositAddress };
+      }),
 
     deposits: protectedProcedure.query(async ({ ctx }) => {
       return getUserCryptoDeposits(ctx.user.id);

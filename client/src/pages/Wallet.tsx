@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import {
   Wallet as WalletIcon, ArrowDownCircle, ArrowUpCircle, Loader2,
   History, Copy, Check, ChevronLeft, AlertTriangle, ExternalLink,
-  Shield, Clock, CheckCircle2, XCircle,
+  Shield, Clock, CheckCircle2, XCircle, RefreshCw,
 } from "lucide-react";
 import { useState, useEffect } from "react";
 import { toast } from "sonner";
@@ -43,6 +43,14 @@ export default function Wallet() {
 
   const getAddressMut = trpc.cryptoWallet.getDepositAddress.useMutation({
     onSuccess: () => {
+      utils.cryptoWallet.getAddresses.invalidate();
+    },
+    onError: (e) => toast.error(e.message),
+  });
+
+  const regenerateMut = trpc.cryptoWallet.regenerateAddress.useMutation({
+    onSuccess: (data) => {
+      toast.success(`Yeni adres oluşturuldu (${data.network.toUpperCase()})`);
       utils.cryptoWallet.getAddresses.invalidate();
     },
     onError: (e) => toast.error(e.message),
@@ -223,7 +231,21 @@ export default function Wallet() {
 
                 {/* Address */}
                 <div className="bg-secondary border border-border rounded-lg p-3">
-                  <div className="text-[11px] text-muted-foreground mb-1 font-medium">Yatırım Adresi</div>
+                  <div className="flex items-center justify-between mb-1">
+                    <div className="text-[11px] text-muted-foreground font-medium">Yatırım Adresi</div>
+                    <button
+                      onClick={() => {
+                        if (confirm("Yeni bir adres oluşturulacak. Eski adrese yapılan bekleyen transferler kaybolabilir. Devam etmek istiyor musunuz?")) {
+                          regenerateMut.mutate({ network: selectedNetwork as any });
+                        }
+                      }}
+                      disabled={regenerateMut.isPending}
+                      className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-primary transition-colors"
+                    >
+                      <RefreshCw className={`h-3 w-3 ${regenerateMut.isPending ? "animate-spin" : ""}`} />
+                      Adresi Yenile
+                    </button>
+                  </div>
                   <div className="flex items-center gap-2">
                     <code className="flex-1 text-xs text-foreground break-all font-mono">{depositAddress}</code>
                     <button

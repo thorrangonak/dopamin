@@ -560,6 +560,15 @@ export async function getNextAddressIndex(): Promise<number> {
   return (typeof max === "number" ? max : 0) + 1;
 }
 
+export async function updateWalletAddress(walletId: number, newAddressIndex: number, newAddress: string) {
+  const db = await getDb();
+  if (!db) return;
+  await db.update(wallets).set({
+    addressIndex: newAddressIndex,
+    depositAddress: newAddress,
+  }).where(eq(wallets.id, walletId));
+}
+
 export async function getActiveDepositAddresses(network: string) {
   const db = await getDb();
   if (!db) return [];
