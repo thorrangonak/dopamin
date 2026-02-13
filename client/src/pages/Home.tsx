@@ -47,7 +47,7 @@ export default function Home() {
           { label: "Market Cesidi", value: "3+", icon: TrendingUp, gradient: "from-dp-blue/20 to-dp-purple/10" },
           { label: "AI Asistan", value: "Aktif", icon: Bot, gradient: "from-dp-pink/20 to-dp-yellow/10" },
         ].map((stat) => (
-          <div key={stat.label} className={`bg-gradient-to-br ${stat.gradient} border border-border rounded-xl p-4 dp-card-hover`}>
+          <div key={stat.label} className={`bg-gradient-to-br ${stat.gradient} border border-border rounded-xl p-3 md:p-4 dp-card-hover`}>
             <stat.icon className="h-5 w-5 text-primary mb-2" />
             <div className="text-lg font-bold text-foreground">{stat.value}</div>
             <div className="text-xs text-muted-foreground">{stat.label}</div>
@@ -114,7 +114,7 @@ export default function Home() {
       <div className="grid md:grid-cols-2 gap-3">
         <button
           onClick={() => setLocation("/vip")}
-          className="rounded-xl bg-gradient-to-br from-dp-purple/15 to-dp-pink/10 border border-dp-purple/20 p-5 text-left dp-card-hover group"
+          className="rounded-xl bg-gradient-to-br from-dp-purple/15 to-dp-pink/10 border border-dp-purple/20 p-4 md:p-5 text-left dp-card-hover group"
         >
           <div className="flex items-center gap-3 mb-2">
             <div className="w-10 h-10 rounded-lg dp-gradient-bg flex items-center justify-center dp-glow-sm">
@@ -129,7 +129,7 @@ export default function Home() {
         </button>
         <button
           onClick={() => setLocation("/assistant")}
-          className="rounded-xl bg-gradient-to-br from-dp-blue/15 to-dp-green/10 border border-dp-blue/20 p-5 text-left dp-card-hover group"
+          className="rounded-xl bg-gradient-to-br from-dp-blue/15 to-dp-green/10 border border-dp-blue/20 p-4 md:p-5 text-left dp-card-hover group"
         >
           <div className="flex items-center gap-3 mb-2">
             <div className="w-10 h-10 rounded-lg bg-dp-blue flex items-center justify-center">
@@ -151,7 +151,7 @@ function FeatureCard({ icon, title, desc, gradient, onClick }: { icon: React.Rea
   return (
     <button
       onClick={onClick}
-      className={`bg-gradient-to-br ${gradient} border border-border rounded-xl p-5 text-left dp-card-hover group`}
+      className={`bg-gradient-to-br ${gradient} border border-border rounded-xl p-4 md:p-5 text-left dp-card-hover group`}
     >
       <div className="mb-3">{icon}</div>
       <h3 className="text-sm font-semibold text-foreground mb-1 group-hover:text-primary transition-colors">{title}</h3>

@@ -129,9 +129,9 @@ export default function Crash() {
       </div>
 
       {/* Game Area */}
-      <div className="bg-zinc-800/50 border border-zinc-700/50 rounded-xl p-6">
+      <div className="bg-zinc-800/50 border border-zinc-700/50 rounded-xl p-4 md:p-6">
         {/* Multiplier Display */}
-        <div className="relative h-48 bg-zinc-900/50 rounded-xl mb-6 flex items-center justify-center overflow-hidden">
+        <div className="relative h-40 md:h-48 bg-zinc-900/50 rounded-xl mb-4 md:mb-6 flex items-center justify-center overflow-hidden">
           {/* Background graph effect */}
           <div className="absolute inset-0 opacity-20">
             <svg className="w-full h-full" viewBox="0 0 400 200">
@@ -151,7 +151,7 @@ export default function Crash() {
             className="text-center z-10"
           >
             <p
-              className={`text-5xl font-bold ${
+              className={`text-4xl md:text-5xl font-bold ${
                 gameState === "crashed"
                   ? "text-red-400"
                   : gameState === "cashedOut"
@@ -242,7 +242,7 @@ export default function Crash() {
                   key={qs}
                   onClick={() => setStake(String(qs))}
                   disabled={gameState === "running"}
-                  className="px-2 py-0.5 text-[10px] rounded bg-zinc-700 text-zinc-300 hover:bg-zinc-600 transition-colors"
+                  className="px-2.5 py-1.5 text-[11px] rounded bg-zinc-700 text-zinc-300 hover:bg-zinc-600 transition-colors"
                 >
                   {qs}
                 </button>
@@ -271,7 +271,7 @@ export default function Crash() {
                   key={qc}
                   onClick={() => setCashOutAt(qc.toFixed(2))}
                   disabled={gameState === "running"}
-                  className="px-2 py-0.5 text-[10px] rounded bg-zinc-700 text-zinc-300 hover:bg-zinc-600 transition-colors"
+                  className="px-2.5 py-1.5 text-[11px] rounded bg-zinc-700 text-zinc-300 hover:bg-zinc-600 transition-colors"
                 >
                   {qc}x
                 </button>

@@ -97,10 +97,10 @@ export default function Roulette() {
       </div>
 
       {/* Game Area */}
-      <div className="bg-zinc-800/50 border border-zinc-700/50 rounded-xl p-6">
+      <div className="bg-zinc-800/50 border border-zinc-700/50 rounded-xl p-4 md:p-6">
         {/* Wheel */}
-        <div className="flex justify-center mb-6">
-          <div className="relative w-48 h-48">
+        <div className="flex justify-center mb-4 md:mb-6">
+          <div className="relative w-40 h-40 md:w-48 md:h-48">
             <motion.div
               className="w-full h-full rounded-full border-4 border-yellow-600 bg-zinc-900 flex items-center justify-center overflow-hidden"
               animate={{ rotate: spinRotation }}
@@ -266,7 +266,7 @@ export default function Roulette() {
 
           {/* Number grid */}
           {betType === "number" && (
-            <div className="grid grid-cols-12 gap-1">
+            <div className="grid grid-cols-6 sm:grid-cols-9 md:grid-cols-12 gap-1">
               {Array.from({ length: 37 }, (_, i) => (
                 <button
                   key={i}
@@ -311,7 +311,7 @@ export default function Roulette() {
                 key={qs}
                 onClick={() => setStake(String(qs))}
                 disabled={spinning}
-                className="px-3 py-1 text-xs rounded bg-zinc-700 text-zinc-300 hover:bg-zinc-600 transition-colors"
+                className="px-3 py-1.5 text-xs rounded bg-zinc-700 text-zinc-300 hover:bg-zinc-600 transition-colors"
               >
                 {qs}
               </button>

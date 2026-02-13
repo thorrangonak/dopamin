@@ -68,9 +68,9 @@ export default function CoinFlip() {
       </div>
 
       {/* Game Area */}
-      <div className="bg-zinc-800/50 border border-zinc-700/50 rounded-xl p-8 flex flex-col items-center">
+      <div className="bg-zinc-800/50 border border-zinc-700/50 rounded-xl p-4 md:p-8 flex flex-col items-center">
         {/* Coin */}
-        <div className="relative w-40 h-40 mb-8">
+        <div className="relative w-32 h-32 md:w-40 md:h-40 mb-6 md:mb-8">
           <motion.div
             key={flipCount}
             className="w-full h-full"
@@ -171,7 +171,7 @@ export default function CoinFlip() {
                 key={qs}
                 onClick={() => setStake(String(qs))}
                 disabled={flipping}
-                className="px-3 py-1 text-xs rounded bg-zinc-700 text-zinc-300 hover:bg-zinc-600 transition-colors"
+                className="px-3 py-1.5 text-xs rounded bg-zinc-700 text-zinc-300 hover:bg-zinc-600 transition-colors"
               >
                 {qs}
               </button>

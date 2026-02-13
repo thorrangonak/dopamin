@@ -88,7 +88,7 @@ export default function ChatWidget() {
             animate={{ scale: 1, opacity: 1 }}
             exit={{ scale: 0, opacity: 0 }}
             onClick={() => setOpen(true)}
-            className="fixed bottom-20 lg:bottom-6 right-4 z-50 w-14 h-14 rounded-full dp-gradient-bg text-white flex items-center justify-center shadow-lg dp-glow hover:scale-105 transition-transform"
+            className="fixed bottom-[5.5rem] lg:bottom-6 right-4 z-[45] w-14 h-14 rounded-full dp-gradient-bg text-white flex items-center justify-center shadow-lg dp-glow hover:scale-105 transition-transform"
             title="AI Asistan"
           >
             <MessageCircle className="h-6 w-6" />
@@ -104,7 +104,7 @@ export default function ChatWidget() {
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 20, scale: 0.95 }}
             transition={{ type: "spring", stiffness: 300, damping: 25 }}
-            className="fixed bottom-20 lg:bottom-6 right-4 z-50 w-[360px] max-w-[calc(100vw-2rem)] h-[500px] max-h-[calc(100vh-8rem)] rounded-xl bg-card border border-border shadow-2xl flex flex-col overflow-hidden"
+            className="fixed bottom-[5.5rem] lg:bottom-6 right-4 z-[55] w-[calc(100vw-2rem)] sm:w-[360px] h-[calc(100vh-7rem)] sm:h-[500px] max-h-[500px] rounded-xl bg-card border border-border shadow-2xl flex flex-col overflow-hidden"
           >
             {/* Header */}
             <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-card shrink-0">

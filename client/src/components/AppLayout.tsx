@@ -342,7 +342,7 @@ function MobileSidebar({ open, onClose }: { open: boolean; onClose: () => void }
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             onClick={onClose}
-            className="lg:hidden fixed inset-0 z-40 bg-black/60 backdrop-blur-sm"
+            className="lg:hidden fixed inset-0 z-[58] bg-black/60 backdrop-blur-sm"
           />
 
           {/* Sidebar panel */}
@@ -351,7 +351,7 @@ function MobileSidebar({ open, onClose }: { open: boolean; onClose: () => void }
             animate={{ x: 0 }}
             exit={{ x: "-100%" }}
             transition={{ type: "spring", stiffness: 300, damping: 30 }}
-            className="lg:hidden fixed inset-y-0 left-0 z-50 w-72 bg-sidebar border-r border-border flex flex-col shadow-2xl"
+            className="lg:hidden fixed inset-y-0 left-0 z-[59] w-[280px] max-w-[85vw] bg-sidebar border-r border-border flex flex-col shadow-2xl"
           >
             {/* Header */}
             <div className="flex items-center justify-between px-4 py-3 border-b border-border">
@@ -502,11 +502,11 @@ function MobileNav() {
             <button
               key={item.path}
               onClick={() => setLocation(item.path)}
-              className={`flex flex-col items-center gap-0.5 px-2 py-1 text-[10px] font-medium transition-all duration-200 ${
+              className={`flex flex-col items-center gap-0.5 px-2 py-1.5 text-[11px] font-medium transition-all duration-200 ${
                 isActive ? "text-primary" : "text-muted-foreground"
               }`}
             >
-              <item.icon className={`h-5 w-5 ${isActive ? "drop-shadow-[0_0_6px_var(--dp-purple)]" : ""}`} />
+              <item.icon className={`h-5 w-5 ${isActive ? "text-primary drop-shadow-[0_0_6px_var(--dp-purple)]" : ""}`} />
               {item.label}
             </button>
           );
@@ -682,7 +682,7 @@ function MobileBetSlip() {
             animate={{ scale: 1 }}
             exit={{ scale: 0 }}
             onClick={() => setMobileOpen(true)}
-            className="xl:hidden fixed bottom-20 right-4 z-50 w-14 h-14 rounded-full dp-gradient-bg text-white flex items-center justify-center shadow-lg dp-glow"
+            className="xl:hidden fixed bottom-[5.5rem] right-20 z-[46] w-14 h-14 rounded-full dp-gradient-bg text-white flex items-center justify-center shadow-lg dp-glow"
           >
             <Ticket className="h-6 w-6" />
             <span className="absolute -top-1 -right-1 bg-destructive text-white text-xs font-bold w-5 h-5 rounded-full flex items-center justify-center">
@@ -695,13 +695,13 @@ function MobileBetSlip() {
       <AnimatePresence>
         {mobileOpen && selections.length > 0 && (
           <>
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setMobileOpen(false)} className="xl:hidden fixed inset-0 z-50 bg-black/60" />
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setMobileOpen(false)} className="xl:hidden fixed inset-0 z-[56] bg-black/60" />
             <motion.div
               initial={{ y: "100%" }}
               animate={{ y: 0 }}
               exit={{ y: "100%" }}
               transition={{ type: "spring", stiffness: 300, damping: 30 }}
-              className="xl:hidden fixed bottom-0 left-0 right-0 z-50 max-h-[80vh] rounded-t-xl bg-card border-t border-border overflow-hidden"
+              className="xl:hidden fixed bottom-0 left-0 right-0 z-[57] max-h-[80vh] rounded-t-xl bg-card border-t border-border overflow-hidden"
             >
               <div className="flex justify-center py-2"><div className="w-10 h-1 rounded-full bg-border" /></div>
               <div className="flex items-center justify-between px-4 py-2 border-b border-border">

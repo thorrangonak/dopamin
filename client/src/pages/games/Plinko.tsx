@@ -99,9 +99,10 @@ export default function Plinko() {
 
   const quickStakes = [5, 10, 25, 50, 100, 250];
 
-  // Board dimensions
-  const boardWidth = 360;
-  const boardHeight = 320;
+  // Board dimensions - responsive
+  const isMobile = typeof window !== "undefined" && window.innerWidth < 640;
+  const boardWidth = isMobile ? Math.min(320, window.innerWidth - 64) : 360;
+  const boardHeight = isMobile ? Math.min(280, boardWidth * 0.88) : 320;
   const pinSpacing = boardWidth / (ROWS + 2);
   const rowHeight = boardHeight / (ROWS + 1);
 
@@ -119,7 +120,7 @@ export default function Plinko() {
       </div>
 
       {/* Game Area */}
-      <div className="bg-zinc-800/50 border border-zinc-700/50 rounded-xl p-6">
+      <div className="bg-zinc-800/50 border border-zinc-700/50 rounded-xl p-4 md:p-6">
         {/* Plinko Board */}
         <div className="flex justify-center mb-6">
           <div className="relative" style={{ width: boardWidth, height: boardHeight + 50 }}>
@@ -231,7 +232,7 @@ export default function Plinko() {
                 key={qs}
                 onClick={() => setStake(String(qs))}
                 disabled={dropping}
-                className="px-3 py-1 text-xs rounded bg-zinc-700 text-zinc-300 hover:bg-zinc-600 transition-colors"
+                className="px-3 py-1.5 text-xs rounded bg-zinc-700 text-zinc-300 hover:bg-zinc-600 transition-colors"
               >
                 {qs}
               </button>

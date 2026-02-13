@@ -59,7 +59,7 @@ export default function CasinoHome() {
   }, [bannersQuery.data]);
 
   return (
-    <div className="p-4 md:p-6 space-y-8">
+    <div className="p-4 md:p-6 space-y-5 md:space-y-8">
       {/* Banner Carousel */}
       <BannerCarousel
         slides={slides}
@@ -79,14 +79,14 @@ export default function CasinoHome() {
             <button
               key={game.path}
               onClick={() => setLocation(game.path)}
-              className={`p-4 rounded-xl bg-gradient-to-br ${game.color} border border-border dp-card-hover group text-left relative overflow-hidden`}
+              className={`p-3 md:p-4 rounded-xl bg-gradient-to-br ${game.color} border border-border dp-card-hover group text-left relative overflow-hidden`}
             >
               {game.hot && (
                 <span className="absolute top-2 right-2 dp-gradient-bg text-white text-[8px] font-bold px-1.5 py-0.5 rounded">
                   HOT
                 </span>
               )}
-              <game.icon className="h-8 w-8 text-foreground mb-3 group-hover:text-primary transition-colors group-hover:scale-110 transform" />
+              <game.icon className="h-6 w-6 md:h-8 md:w-8 text-foreground mb-2 md:mb-3 group-hover:text-primary transition-colors group-hover:scale-110 transform" />
               <div className="text-sm font-bold text-foreground">{game.name}</div>
               <div className="text-[10px] text-muted-foreground mt-0.5">{game.desc}</div>
               <div className="mt-2 text-[10px] font-semibold text-primary opacity-0 group-hover:opacity-100 transition-opacity">
@@ -105,7 +105,7 @@ export default function CasinoHome() {
             <button
               key={cat.path}
               onClick={() => setLocation(cat.path)}
-              className={`p-4 rounded-xl bg-gradient-to-br ${cat.color} border border-border dp-card-hover group text-left`}
+              className={`p-3 md:p-4 rounded-xl bg-gradient-to-br ${cat.color} border border-border dp-card-hover group text-left`}
             >
               <cat.icon className="h-6 w-6 text-foreground mb-2 group-hover:text-primary transition-colors" />
               <div className="text-sm font-semibold text-foreground">{cat.label}</div>
@@ -130,7 +130,7 @@ export default function CasinoHome() {
               onClick={() => toast.info("Bu oyun yakında aktif olacak!")}
               className="group rounded-lg bg-card border border-border hover:border-primary/40 transition-all overflow-hidden"
             >
-              <div className="aspect-[3/4] bg-gradient-to-br from-secondary to-accent/30 flex items-center justify-center relative">
+              <div className="aspect-square md:aspect-[3/4] bg-gradient-to-br from-secondary to-accent/30 flex items-center justify-center relative">
                 <Cherry className="h-10 w-10 text-muted-foreground/40" />
                 {game.hot && (
                   <span className="absolute top-2 right-2 bg-destructive text-white text-[10px] font-bold px-1.5 py-0.5 rounded">
@@ -148,7 +148,7 @@ export default function CasinoHome() {
       </div>
 
       {/* Promotions Banner */}
-      <div className="rounded-xl bg-gradient-to-r from-dp-purple/10 to-dp-pink/10 border border-dp-purple/20 p-6">
+      <div className="rounded-xl bg-gradient-to-r from-dp-purple/10 to-dp-pink/10 border border-dp-purple/20 p-4 md:p-6">
         <div className="flex items-center gap-3 mb-3">
           <Gift className="h-6 w-6 text-dp-pink" />
           <h2 className="text-lg font-bold text-foreground">Serotonin Boost</h2>

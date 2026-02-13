@@ -70,14 +70,14 @@ export default function Dice() {
       </div>
 
       {/* Game Area */}
-      <div className="bg-zinc-800/50 border border-zinc-700/50 rounded-xl p-8">
+      <div className="bg-zinc-800/50 border border-zinc-700/50 rounded-xl p-4 md:p-8">
         {/* Result Display */}
-        <div className="flex justify-center mb-8">
+        <div className="flex justify-center mb-6 md:mb-8">
           <motion.div
             key={result?.details?.roll}
             initial={result ? { scale: 0.5, opacity: 0 } : false}
             animate={{ scale: 1, opacity: 1 }}
-            className={`w-32 h-32 rounded-2xl border-4 flex items-center justify-center text-4xl font-bold ${
+            className={`w-24 h-24 md:w-32 md:h-32 rounded-2xl border-4 flex items-center justify-center text-3xl md:text-4xl font-bold ${
               result
                 ? result.result === "win"
                   ? "bg-green-500/20 border-green-500 text-green-400"
@@ -191,7 +191,7 @@ export default function Dice() {
                 key={qs}
                 onClick={() => setStake(String(qs))}
                 disabled={rolling}
-                className="px-3 py-1 text-xs rounded bg-zinc-700 text-zinc-300 hover:bg-zinc-600 transition-colors"
+                className="px-3 py-1.5 text-xs rounded bg-zinc-700 text-zinc-300 hover:bg-zinc-600 transition-colors"
               >
                 {qs}
               </button>

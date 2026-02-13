@@ -237,7 +237,7 @@ export default function Mines() {
                   key={m}
                   onClick={() => !playing && setMineCount(m)}
                   disabled={playing}
-                  className={`px-2.5 py-1 text-xs rounded transition-colors ${
+                  className={`px-2.5 py-1.5 text-xs rounded transition-colors ${
                     mineCount === m
                       ? "bg-red-500 text-white"
                       : "bg-zinc-700 text-zinc-300 hover:bg-zinc-600"
@@ -269,7 +269,7 @@ export default function Mines() {
                   key={qs}
                   onClick={() => setStake(String(qs))}
                   disabled={playing}
-                  className="px-2 py-0.5 text-[10px] rounded bg-zinc-700 text-zinc-300 hover:bg-zinc-600 transition-colors"
+                  className="px-2.5 py-1.5 text-[11px] rounded bg-zinc-700 text-zinc-300 hover:bg-zinc-600 transition-colors"
                 >
                   {qs}
                 </button>
