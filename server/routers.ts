@@ -1,7 +1,9 @@
-import { COOKIE_NAME } from "@shared/const";
+import { COOKIE_NAME, ONE_YEAR_MS } from "@shared/const";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { publicProcedure, protectedProcedure, adminProcedure, router } from "./_core/trpc";
+import { sdk } from "./_core/sdk";
+import { hashPassword, verifyPassword } from "./_core/password";
 import { z } from "zod";
 import { fetchSports, fetchOdds, fetchScores } from "./oddsApi";
 import {
@@ -14,6 +16,7 @@ import {
   getUserBetStats, getUserSportDistribution, getUserCasinoStats, getUserBalanceHistory,
   getOrCreateVipProfile, addVipXp, getAllVipProfiles, VIP_TIERS, getNextTier,
   getActiveBanners, getAllBanners, getBannerById, createBanner, updateBanner, deleteBanner, reorderBanners,
+  upsertUser, getUserByEmail, getOrCreateBalance as ensureBalance,
 } from "./db";
 import { settleBets } from "./settlement";
 import { calculateCasinoResult } from "./casinoEngine";
@@ -23,6 +26,79 @@ export const appRouter = router({
   system: systemRouter,
   auth: router({
     me: publicProcedure.query(opts => opts.ctx.user),
+
+    register: publicProcedure
+      .input(z.object({
+        username: z.string().min(2).max(32),
+        email: z.string().email().max(320),
+        password: z.string().min(6).max(128),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        const existing = await getUserByEmail(input.email);
+        if (existing) {
+          throw new Error("Bu e-posta adresi zaten kayıtlı");
+        }
+
+        const openId = `email-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        const hashed = hashPassword(input.password);
+
+        await upsertUser({
+          openId,
+          name: input.username,
+          email: input.email,
+          passwordHash: hashed,
+          loginMethod: "email",
+          lastSignedIn: new Date(),
+        });
+
+        const user = await getUserByEmail(input.email);
+        if (!user) throw new Error("Kayıt başarısız");
+
+        // Create initial balance
+        await ensureBalance(user.id);
+
+        // Create session
+        const sessionToken = await sdk.createSessionToken(openId, {
+          name: input.username,
+          expiresInMs: ONE_YEAR_MS,
+        });
+
+        const cookieOptions = getSessionCookieOptions(ctx.req);
+        ctx.res.cookie(COOKIE_NAME, sessionToken, { ...cookieOptions, maxAge: ONE_YEAR_MS });
+
+        return { success: true, user: { id: user.id, name: user.name, email: user.email } };
+      }),
+
+    login: publicProcedure
+      .input(z.object({
+        email: z.string().email(),
+        password: z.string().min(1),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        const user = await getUserByEmail(input.email);
+        if (!user || !user.passwordHash) {
+          throw new Error("E-posta veya şifre hatalı");
+        }
+
+        if (!verifyPassword(input.password, user.passwordHash)) {
+          throw new Error("E-posta veya şifre hatalı");
+        }
+
+        // Update last signed in
+        await upsertUser({ openId: user.openId, lastSignedIn: new Date() });
+
+        // Create session
+        const sessionToken = await sdk.createSessionToken(user.openId, {
+          name: user.name || "",
+          expiresInMs: ONE_YEAR_MS,
+        });
+
+        const cookieOptions = getSessionCookieOptions(ctx.req);
+        ctx.res.cookie(COOKIE_NAME, sessionToken, { ...cookieOptions, maxAge: ONE_YEAR_MS });
+
+        return { success: true, user: { id: user.id, name: user.name, email: user.email } };
+      }),
+
     logout: publicProcedure.mutation(({ ctx }) => {
       const cookieOptions = getSessionCookieOptions(ctx.req);
       ctx.res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 });

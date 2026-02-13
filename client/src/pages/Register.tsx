@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useLocation } from "wouter";
 import { Loader2 } from "lucide-react";
 import DopaminLogo from "@/components/DopaminLogo";
+import { trpc } from "@/lib/trpc";
 
 export default function Register() {
   const [, setLocation] = useLocation();
@@ -9,39 +10,44 @@ export default function Register() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [passwordConfirm, setPasswordConfirm] = useState("");
-  const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+
+  const registerMutation = trpc.auth.register.useMutation({
+    onSuccess: () => {
+      window.location.href = "/";
+    },
+    onError: (err) => {
+      setError(err.message || "Kayit basarisiz");
+    },
+  });
 
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
 
     if (password !== passwordConfirm) {
-      setError("Şifreler eşleşmiyor");
+      setError("Sifreler eslesmiyor");
       return;
     }
 
-    setLoading(true);
-    // Demo: call dev-login to create session, then redirect
-    window.location.href = "/dev-login";
+    registerMutation.mutate({ username, email, password });
   };
 
   return (
     <div className="min-h-screen flex items-center justify-center dp-gradient-bg p-4">
       <div className="w-full max-w-md bg-card border border-border rounded-2xl shadow-2xl p-8">
-        {/* Logo */}
         <div className="flex justify-center mb-8">
           <DopaminLogo size="lg" />
         </div>
 
-        <h1 className="text-2xl font-bold text-foreground text-center mb-2">Kayıt Ol</h1>
+        <h1 className="text-2xl font-bold text-foreground text-center mb-2">Kayit Ol</h1>
         <p className="text-sm text-muted-foreground text-center mb-6">
-          Kripto ile bahis dünyasına katılın
+          Kripto ile bahis dunyasina katilin
         </p>
 
         <form onSubmit={handleRegister} className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-foreground mb-1.5">Kullanıcı Adı</label>
+            <label className="block text-sm font-medium text-foreground mb-1.5">Kullanici Adi</label>
             <input
               type="text"
               value={username}
@@ -65,7 +71,7 @@ export default function Register() {
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-foreground mb-1.5">Şifre</label>
+            <label className="block text-sm font-medium text-foreground mb-1.5">Sifre</label>
             <input
               type="password"
               value={password}
@@ -78,7 +84,7 @@ export default function Register() {
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-foreground mb-1.5">Şifre Tekrar</label>
+            <label className="block text-sm font-medium text-foreground mb-1.5">Sifre Tekrar</label>
             <input
               type="password"
               value={passwordConfirm}
@@ -96,21 +102,21 @@ export default function Register() {
 
           <button
             type="submit"
-            disabled={loading}
+            disabled={registerMutation.isPending}
             className="w-full py-3 rounded-lg dp-gradient-bg text-white font-semibold text-sm hover:opacity-90 transition-opacity disabled:opacity-50 flex items-center justify-center gap-2 dp-glow-sm"
           >
-            {loading && <Loader2 className="h-4 w-4 animate-spin" />}
-            Kayıt Ol
+            {registerMutation.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
+            Kayit Ol
           </button>
         </form>
 
         <p className="text-sm text-muted-foreground text-center mt-6">
-          Zaten hesabın var?{" "}
+          Zaten hesabin var?{" "}
           <button
             onClick={() => setLocation("/login")}
             className="text-primary font-semibold hover:underline"
           >
-            Giriş Yap
+            Giris Yap
           </button>
         </p>
       </div>
