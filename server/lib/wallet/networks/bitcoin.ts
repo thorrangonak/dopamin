@@ -149,7 +149,7 @@ export async function sendBtc(
         }).output!,
         value: BigInt(utxo.value),
       },
-    });
+    } as any);
   }
 
   psbt.addOutput({ address: toAddress, value: BigInt(amountSats) });
