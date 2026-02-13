@@ -3,7 +3,7 @@
 
 import { NETWORKS } from "../index";
 
-const BLOCKSTREAM_BASE = "https://blockstream.info/testnet/api";
+const BLOCKSTREAM_BASE = "https://blockstream.info/api";
 
 export interface BtcBalance {
   confirmed: number;
@@ -102,13 +102,13 @@ export async function sendBtc(
   if (!mnemonic) throw new Error("WALLET_MNEMONIC not set");
 
   const seed = await bip39.mnemonicToSeed(mnemonic);
-  const root = bip32.fromSeed(seed, bitcoin.networks.testnet);
+  const root = bip32.fromSeed(seed, bitcoin.networks.bitcoin);
   const path = `m/44'/0'/${userIndex}'/0/0`;
   const child = root.derivePath(path);
 
   const { address: fromAddress } = bitcoin.payments.p2wpkh({
     pubkey: Buffer.from(child.publicKey),
-    network: bitcoin.networks.testnet,
+    network: bitcoin.networks.bitcoin,
   });
 
   if (!fromAddress) throw new Error("Failed to derive source address");
@@ -120,7 +120,7 @@ export async function sendBtc(
   if (!utxos.length) throw new Error("No UTXOs available");
 
   const amountSats = Math.floor(amountBtc * 1e8);
-  const feeSats = 1000; // ~1000 sats fee for testnet
+  const feeSats = 5000; // ~5000 sats fee for mainnet
 
   // Simple UTXO selection
   let inputSum = 0;
@@ -133,7 +133,7 @@ export async function sendBtc(
 
   if (inputSum < amountSats + feeSats) throw new Error("Insufficient BTC balance");
 
-  const psbt = new bitcoin.Psbt({ network: bitcoin.networks.testnet });
+  const psbt = new bitcoin.Psbt({ network: bitcoin.networks.bitcoin });
 
   for (const utxo of selectedUtxos) {
     const txHexRes = await fetch(`${BLOCKSTREAM_BASE}/tx/${utxo.txid}/hex`);
@@ -145,7 +145,7 @@ export async function sendBtc(
       witnessUtxo: {
         script: bitcoin.payments.p2wpkh({
           pubkey: Buffer.from(child.publicKey),
-          network: bitcoin.networks.testnet,
+          network: bitcoin.networks.bitcoin,
         }).output!,
         value: BigInt(utxo.value),
       },

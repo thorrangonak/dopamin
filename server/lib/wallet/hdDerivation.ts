@@ -117,11 +117,11 @@ async function deriveBitcoinAddress(userIndex: number): Promise<{ address: strin
   const bip32 = BIP32Factory(ecc);
   const seed = await getSeedBuffer();
   const path = `m/44'/0'/${userIndex}'/0/0`;
-  const root = bip32.fromSeed(seed, bitcoin.networks.testnet);
+  const root = bip32.fromSeed(seed, bitcoin.networks.bitcoin);
   const child = root.derivePath(path);
   const { address } = bitcoin.payments.p2wpkh({
     pubkey: Buffer.from(child.publicKey),
-    network: bitcoin.networks.testnet,
+    network: bitcoin.networks.bitcoin,
   });
   if (!address) throw new Error("Failed to derive Bitcoin address");
   return { address, path };
