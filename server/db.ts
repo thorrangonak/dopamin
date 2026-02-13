@@ -1,6 +1,6 @@
 import { eq, desc, and, sql, inArray, asc, lte, gte, isNull, or } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
-import { InsertUser, users, balances, transactions, bets, betItems, sportsCache, eventsCache, casinoGames, vipProfiles, banners, type InsertBanner, chatMessages, wallets, cryptoDeposits, cryptoWithdrawals } from "../drizzle/schema";
+import { InsertUser, users, balances, transactions, bets, betItems, sportsCache, eventsCache, casinoGames, vipProfiles, banners, type InsertBanner, chatMessages, wallets, cryptoDeposits, cryptoWithdrawals, provablyFairSeeds, casinoGameSessions, responsibleGamblingSettings, responsibleGamblingLog, rtpTracking } from "../drizzle/schema";
 import { ENV } from './_core/env';
 
 let _db: ReturnType<typeof drizzle> | null = null;
@@ -798,4 +798,289 @@ export async function getAllWithdrawals(limit = 100) {
   return db.select().from(cryptoWithdrawals)
     .orderBy(desc(cryptoWithdrawals.createdAt))
     .limit(limit);
+}
+
+// ─── Provably Fair Seed Helpers ───
+
+export async function createProvablyFairSeed(userId: number, serverSeed: string, serverSeedHash: string, clientSeed: string) {
+  const db = await getDb();
+  if (!db) return null;
+  const [inserted] = await db.insert(provablyFairSeeds).values({
+    userId, serverSeed, serverSeedHash, clientSeed,
+  }).$returningId();
+  return inserted.id;
+}
+
+export async function getActiveSeed(userId: number) {
+  const db = await getDb();
+  if (!db) return null;
+  const result = await db.select().from(provablyFairSeeds)
+    .where(and(eq(provablyFairSeeds.userId, userId), eq(provablyFairSeeds.status, "active")))
+    .limit(1);
+  return result.length > 0 ? result[0] : null;
+}
+
+export async function incrementSeedNonce(seedId: number): Promise<number> {
+  const db = await getDb();
+  if (!db) return 0;
+  await db.update(provablyFairSeeds)
+    .set({ nonce: sql`nonce + 1` })
+    .where(eq(provablyFairSeeds.id, seedId));
+  const updated = await db.select({ nonce: provablyFairSeeds.nonce })
+    .from(provablyFairSeeds)
+    .where(eq(provablyFairSeeds.id, seedId))
+    .limit(1);
+  return updated[0]?.nonce ?? 0;
+}
+
+export async function updateSeedClientSeed(seedId: number, clientSeed: string) {
+  const db = await getDb();
+  if (!db) return;
+  await db.update(provablyFairSeeds)
+    .set({ clientSeed })
+    .where(eq(provablyFairSeeds.id, seedId));
+}
+
+export async function revealSeed(seedId: number) {
+  const db = await getDb();
+  if (!db) return null;
+  await db.update(provablyFairSeeds)
+    .set({ status: "revealed", revealedAt: new Date() })
+    .where(eq(provablyFairSeeds.id, seedId));
+  return db.select().from(provablyFairSeeds).where(eq(provablyFairSeeds.id, seedId)).limit(1).then(r => r[0] ?? null);
+}
+
+export async function getSeedById(seedId: number) {
+  const db = await getDb();
+  if (!db) return null;
+  const result = await db.select().from(provablyFairSeeds).where(eq(provablyFairSeeds.id, seedId)).limit(1);
+  return result.length > 0 ? result[0] : null;
+}
+
+// ─── Casino Game Session Helpers ───
+
+export async function createGameSession(data: {
+  userId: number;
+  gameType: string;
+  stake: string;
+  serverSeedId: number;
+  nonce: number;
+  gameData: any;
+  commitHash: string;
+}) {
+  const db = await getDb();
+  if (!db) return null;
+  const [inserted] = await db.insert(casinoGameSessions).values({
+    userId: data.userId,
+    gameType: data.gameType,
+    stake: data.stake,
+    serverSeedId: data.serverSeedId,
+    nonce: data.nonce,
+    gameData: data.gameData,
+    commitHash: data.commitHash,
+  }).$returningId();
+  return inserted.id;
+}
+
+export async function getActiveGameSession(userId: number, gameType: string) {
+  const db = await getDb();
+  if (!db) return null;
+  const result = await db.select().from(casinoGameSessions)
+    .where(and(
+      eq(casinoGameSessions.userId, userId),
+      eq(casinoGameSessions.gameType, gameType),
+      eq(casinoGameSessions.status, "active"),
+    ))
+    .limit(1);
+  return result.length > 0 ? result[0] : null;
+}
+
+export async function getGameSessionById(sessionId: number) {
+  const db = await getDb();
+  if (!db) return null;
+  const result = await db.select().from(casinoGameSessions).where(eq(casinoGameSessions.id, sessionId)).limit(1);
+  return result.length > 0 ? result[0] : null;
+}
+
+export async function completeGameSession(sessionId: number, result: "win" | "loss", multiplier: string, payout: string) {
+  const db = await getDb();
+  if (!db) return;
+  await db.update(casinoGameSessions).set({
+    status: "completed",
+    result,
+    multiplier,
+    payout,
+    completedAt: new Date(),
+  }).where(eq(casinoGameSessions.id, sessionId));
+}
+
+export async function cancelGameSession(sessionId: number) {
+  const db = await getDb();
+  if (!db) return;
+  await db.update(casinoGameSessions).set({
+    status: "cancelled",
+    completedAt: new Date(),
+  }).where(eq(casinoGameSessions.id, sessionId));
+}
+
+// ─── Responsible Gambling Helpers ───
+
+export async function getResponsibleGamblingSettings(userId: number) {
+  const db = await getDb();
+  if (!db) return null;
+  const result = await db.select().from(responsibleGamblingSettings)
+    .where(eq(responsibleGamblingSettings.userId, userId))
+    .limit(1);
+  return result.length > 0 ? result[0] : null;
+}
+
+export async function upsertResponsibleGamblingSettings(userId: number, data: Partial<{
+  selfExclusionUntil: Date | null;
+  selfExclusionType: "24h" | "7d" | "30d" | "permanent" | null;
+  depositLimitDaily: string | null;
+  depositLimitWeekly: string | null;
+  depositLimitMonthly: string | null;
+  lossLimitDaily: string | null;
+  lossLimitWeekly: string | null;
+  lossLimitMonthly: string | null;
+  wagerLimitDaily: string | null;
+  wagerLimitWeekly: string | null;
+  wagerLimitMonthly: string | null;
+  sessionReminderMinutes: number | null;
+  realityCheckMinutes: number | null;
+}>) {
+  const db = await getDb();
+  if (!db) return;
+
+  const existing = await getResponsibleGamblingSettings(userId);
+  if (existing) {
+    await db.update(responsibleGamblingSettings)
+      .set(data as any)
+      .where(eq(responsibleGamblingSettings.userId, userId));
+  } else {
+    await db.insert(responsibleGamblingSettings).values({ userId, ...data } as any);
+  }
+}
+
+export async function addResponsibleGamblingLog(userId: number, action: string, details?: any) {
+  const db = await getDb();
+  if (!db) return;
+  await db.insert(responsibleGamblingLog).values({ userId, action, details });
+}
+
+export async function getResponsibleGamblingLogs(userId: number, limit = 50) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(responsibleGamblingLog)
+    .where(eq(responsibleGamblingLog.userId, userId))
+    .orderBy(desc(responsibleGamblingLog.createdAt))
+    .limit(limit);
+}
+
+/** Get user's total wager in the last N hours */
+export async function getUserWagerTotal(userId: number, hours: number): Promise<number> {
+  const db = await getDb();
+  if (!db) return 0;
+  const result = await db.select({
+    total: sql<string>`COALESCE(SUM(${casinoGames.stake}), 0)`,
+  }).from(casinoGames).where(and(
+    eq(casinoGames.userId, userId),
+    gte(casinoGames.createdAt, sql`DATE_SUB(NOW(), INTERVAL ${hours} HOUR)`),
+  ));
+  return parseFloat(result[0]?.total || "0");
+}
+
+/** Get user's net loss in the last N hours */
+export async function getUserLossTotal(userId: number, hours: number): Promise<number> {
+  const db = await getDb();
+  if (!db) return 0;
+  const result = await db.select({
+    totalStaked: sql<string>`COALESCE(SUM(${casinoGames.stake}), 0)`,
+    totalPayout: sql<string>`COALESCE(SUM(${casinoGames.payout}), 0)`,
+  }).from(casinoGames).where(and(
+    eq(casinoGames.userId, userId),
+    gte(casinoGames.createdAt, sql`DATE_SUB(NOW(), INTERVAL ${hours} HOUR)`),
+  ));
+  const staked = parseFloat(result[0]?.totalStaked || "0");
+  const payout = parseFloat(result[0]?.totalPayout || "0");
+  return Math.max(0, staked - payout);
+}
+
+// ─── RTP Tracking Helpers ───
+
+export async function updateRtpTracking(gameType: string, wagered: number, paidOut: number) {
+  const db = await getDb();
+  if (!db) return;
+
+  const now = new Date();
+  const periodStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()); // start of day
+  const periodEnd = new Date(periodStart.getTime() + 24 * 60 * 60 * 1000);
+
+  // Try to find existing record for this game + today
+  const existing = await db.select().from(rtpTracking).where(and(
+    eq(rtpTracking.gameType, gameType),
+    eq(rtpTracking.periodStart, periodStart),
+  )).limit(1);
+
+  if (existing.length > 0) {
+    const rec = existing[0];
+    const newWagered = parseFloat(rec.totalWagered) + wagered;
+    const newPaidOut = parseFloat(rec.totalPaidOut) + paidOut;
+    const newGames = rec.totalGames + 1;
+    const newRtp = newWagered > 0 ? (newPaidOut / newWagered) * 100 : 0;
+    await db.update(rtpTracking).set({
+      totalWagered: newWagered.toFixed(2),
+      totalPaidOut: newPaidOut.toFixed(2),
+      totalGames: newGames,
+      rtp: newRtp.toFixed(4),
+    }).where(eq(rtpTracking.id, rec.id));
+  } else {
+    const rtp = wagered > 0 ? (paidOut / wagered) * 100 : 0;
+    await db.insert(rtpTracking).values({
+      gameType,
+      periodStart,
+      periodEnd,
+      totalWagered: wagered.toFixed(2),
+      totalPaidOut: paidOut.toFixed(2),
+      totalGames: 1,
+      rtp: rtp.toFixed(4),
+    });
+  }
+}
+
+export async function getRtpReport(days = 30) {
+  const db = await getDb();
+  if (!db) return [];
+  const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+  return db.select().from(rtpTracking)
+    .where(gte(rtpTracking.periodStart, since))
+    .orderBy(desc(rtpTracking.periodStart));
+}
+
+export async function getRtpSummary() {
+  const db = await getDb();
+  if (!db) return [];
+  const result = await db.select({
+    gameType: rtpTracking.gameType,
+    totalWagered: sql<string>`SUM(${rtpTracking.totalWagered})`,
+    totalPaidOut: sql<string>`SUM(${rtpTracking.totalPaidOut})`,
+    totalGames: sql<number>`SUM(${rtpTracking.totalGames})`,
+  }).from(rtpTracking)
+    .groupBy(rtpTracking.gameType);
+
+  return result.map(r => ({
+    gameType: r.gameType,
+    totalWagered: parseFloat(r.totalWagered || "0"),
+    totalPaidOut: parseFloat(r.totalPaidOut || "0"),
+    totalGames: Number(r.totalGames || 0),
+    rtp: parseFloat(r.totalWagered || "0") > 0
+      ? (parseFloat(r.totalPaidOut || "0") / parseFloat(r.totalWagered || "0")) * 100
+      : 0,
+  }));
+}
+
+export async function getAllCasinoGames(limit = 100) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(casinoGames).orderBy(desc(casinoGames.createdAt)).limit(limit);
 }

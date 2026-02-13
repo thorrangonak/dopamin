@@ -6,7 +6,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
 import { motion } from "framer-motion";
-import { CircleDot } from "lucide-react";
+import { CircleDot, Shield } from "lucide-react";
+import { Link } from "wouter";
 import { useCurrency } from "@/contexts/CurrencyContext";
 
 const RED_NUMBERS = [1, 3, 5, 7, 9, 12, 14, 16, 18, 19, 21, 23, 25, 27, 30, 32, 34, 36];
@@ -24,7 +25,7 @@ export default function Roulette() {
   const [spinRotation, setSpinRotation] = useState(0);
 
   const balanceQ = trpc.balance.get.useQuery(undefined, { enabled: isAuthenticated });
-  const playMut = trpc.casino.play.useMutation({
+  const playMut = trpc.casino.playRoulette.useMutation({
     onSuccess: (data) => {
       // Calculate rotation to land on result number
       const resultNum = data.details.result;
@@ -62,9 +63,9 @@ export default function Roulette() {
     setSpinning(true);
     setResult(null);
     playMut.mutate({
-      gameType: "roulette",
       stake: s,
-      params: { betType, number: betNumber },
+      betType,
+      number: betNumber,
     });
   };
 
@@ -91,18 +92,18 @@ export default function Roulette() {
           <CircleDot className="w-5 h-5 text-emerald-400" />
         </div>
         <div>
-          <h1 className="text-xl font-bold text-white">Roulette</h1>
-          <p className="text-sm text-zinc-400">Klasik Avrupa ruleti - 0'dan 36'ya</p>
+          <h1 className="text-xl font-bold text-foreground">Roulette</h1>
+          <p className="text-sm text-muted-foreground">Klasik Avrupa ruleti - 0'dan 36'ya</p>
         </div>
       </div>
 
       {/* Game Area */}
-      <div className="bg-zinc-800/50 border border-zinc-700/50 rounded-xl p-4 md:p-6">
+      <div className="bg-card border border-border rounded-xl p-4 md:p-6">
         {/* Wheel */}
         <div className="flex justify-center mb-4 md:mb-6">
           <div className="relative w-40 h-40 md:w-48 md:h-48">
             <motion.div
-              className="w-full h-full rounded-full border-4 border-yellow-600 bg-zinc-900 flex items-center justify-center overflow-hidden"
+              className="w-full h-full rounded-full border-4 border-yellow-600 bg-secondary flex items-center justify-center overflow-hidden"
               animate={{ rotate: spinRotation }}
               transition={{ duration: 2, ease: "easeOut" }}
             >
@@ -126,8 +127,8 @@ export default function Roulette() {
                 })}
               </div>
               {/* Center */}
-              <div className="relative z-10 w-16 h-16 rounded-full bg-zinc-800 border-2 border-yellow-600 flex items-center justify-center">
-                <span className="text-lg font-bold text-white">
+              <div className="relative z-10 w-16 h-16 rounded-full bg-card border-2 border-yellow-600 flex items-center justify-center">
+                <span className="text-lg font-bold text-foreground">
                   {result ? result.details.result : "?"}
                 </span>
               </div>
@@ -155,12 +156,12 @@ export default function Roulette() {
                     ? "bg-red-600"
                     : result.details.color === "green"
                     ? "bg-green-600"
-                    : "bg-zinc-800 border border-zinc-600"
+                    : "bg-secondary border border-border"
                 }`}
               >
                 {result.details.result}
               </span>
-              <span className="text-zinc-300 text-sm capitalize">{result.details.color}</span>
+              <span className="text-foreground/80 text-sm capitalize">{result.details.color}</span>
             </div>
             <p
               className={`text-xl font-bold ${
@@ -174,9 +175,18 @@ export default function Roulette() {
           </motion.div>
         )}
 
+        {/* Provably Fair Badge */}
+        {result?.fairness && (
+          <div className="flex items-center justify-center gap-2 mb-4 text-xs text-muted-foreground">
+            <Shield className="w-3.5 h-3.5 text-green-500" />
+            <span>Seed: {result.fairness.serverSeedHash.slice(0, 8)}... | Nonce: {result.fairness.nonce}</span>
+            <Link href="/provably-fair" className="text-green-500 hover:underline">Doğrula</Link>
+          </div>
+        )}
+
         {/* Bet Type Selection */}
         <div className="space-y-3 mb-6">
-          <label className="text-xs text-zinc-400">Bahis Türü</label>
+          <label className="text-xs text-muted-foreground">Bahis Türü</label>
 
           {/* Color bets */}
           <div className="grid grid-cols-3 gap-2">
@@ -207,8 +217,8 @@ export default function Roulette() {
               disabled={spinning}
               className={`py-2.5 rounded-lg text-sm font-semibold transition-all ${
                 betType === "black"
-                  ? "bg-zinc-900 text-white ring-2 ring-zinc-400"
-                  : "bg-zinc-700/50 text-zinc-300 hover:bg-zinc-700"
+                  ? "bg-secondary text-foreground ring-2 ring-muted-foreground"
+                  : "bg-secondary/50 text-foreground/80 hover:bg-secondary"
               }`}
             >
               Siyah (2x)
@@ -229,7 +239,7 @@ export default function Roulette() {
                   className={`py-2 rounded-lg text-xs font-semibold transition-all ${
                     betType === bt
                       ? "bg-blue-600 text-white ring-2 ring-blue-400"
-                      : "bg-zinc-700 text-zinc-300 hover:bg-zinc-600"
+                      : "bg-secondary text-foreground/80 hover:bg-accent"
                   }`}
                 >
                   {labels[bt]} (2x)
@@ -246,7 +256,7 @@ export default function Roulette() {
               className={`px-4 py-2 rounded-lg text-xs font-semibold transition-all ${
                 betType === "number"
                   ? "bg-yellow-600 text-white ring-2 ring-yellow-400"
-                  : "bg-zinc-700 text-zinc-300 hover:bg-zinc-600"
+                  : "bg-secondary text-foreground/80 hover:bg-accent"
               }`}
             >
               Numara (36x)
@@ -256,7 +266,7 @@ export default function Roulette() {
                 type="number"
                 value={betNumber}
                 onChange={(e) => setBetNumber(Math.max(0, Math.min(36, parseInt(e.target.value) || 0)))}
-                className="w-20 bg-zinc-900 border-zinc-700 text-white text-sm"
+                className="w-20 bg-secondary border-border text-foreground text-sm"
                 min={0}
                 max={36}
                 disabled={spinning}
@@ -281,7 +291,7 @@ export default function Roulette() {
                       ? "bg-green-600 text-white col-span-1"
                       : RED_NUMBERS.includes(i)
                       ? "bg-red-600 text-white"
-                      : "bg-zinc-800 text-zinc-300 border border-zinc-700"
+                      : "bg-secondary text-foreground/80 border border-border"
                   }`}
                 >
                   {i}
@@ -298,12 +308,12 @@ export default function Roulette() {
               type="number"
               value={stake}
               onChange={(e) => setStake(e.target.value)}
-              className="bg-zinc-900 border-zinc-700 text-white"
+              className="bg-secondary border-border text-foreground"
               min={1}
               disabled={spinning}
             />
-            <span className="text-zinc-400 text-sm">{currencySymbol}</span>
-            <span className="text-xs text-zinc-500">Çarpan: {getMultiplier()}</span>
+            <span className="text-muted-foreground text-sm">{currencySymbol}</span>
+            <span className="text-xs text-muted-foreground">Çarpan: {getMultiplier()}</span>
           </div>
           <div className="flex flex-wrap gap-1.5">
             {quickStakes.map((qs) => (
@@ -311,7 +321,7 @@ export default function Roulette() {
                 key={qs}
                 onClick={() => setStake(String(qs))}
                 disabled={spinning}
-                className="px-3 py-1.5 text-xs rounded bg-zinc-700 text-zinc-300 hover:bg-zinc-600 transition-colors"
+                className="px-3 py-1.5 text-xs rounded bg-secondary text-foreground/80 hover:bg-accent transition-colors"
               >
                 {qs}
               </button>
@@ -321,13 +331,13 @@ export default function Roulette() {
           <Button
             onClick={handlePlay}
             disabled={spinning}
-            className="w-full bg-green-500 hover:bg-green-600 text-black font-bold py-3"
+            className="w-full bg-primary hover:bg-primary/90 text-primary-foreground font-bold py-3"
           >
             {spinning ? "Çark Dönüyor..." : `Çevir (${formatAmount(parseFloat(stake || "0"))})`}
           </Button>
 
           {isAuthenticated && balanceQ.data && (
-            <p className="text-center text-xs text-zinc-500">
+            <p className="text-center text-xs text-muted-foreground">
               Bakiye: {formatAmount(balanceQ.data.amount)}
             </p>
           )}
@@ -335,9 +345,9 @@ export default function Roulette() {
       </div>
 
       {/* Info */}
-      <div className="bg-zinc-800/30 border border-zinc-700/30 rounded-lg p-4">
-        <h3 className="text-sm font-semibold text-zinc-300 mb-2">Nasıl Oynanır?</h3>
-        <ul className="text-xs text-zinc-500 space-y-1">
+      <div className="bg-card/50 border border-border/50 rounded-lg p-4">
+        <h3 className="text-sm font-semibold text-foreground/80 mb-2">Nasıl Oynanır?</h3>
+        <ul className="text-xs text-muted-foreground space-y-1">
           <li>• Kırmızı/Siyah/Yeşil, Tek/Çift, Düşük/Yüksek veya Numara seçin</li>
           <li>• Kırmızı/Siyah/Tek/Çift/1-18/19-36: 2x çarpan</li>
           <li>• Yeşil (0) veya Numara: 36x çarpan</li>

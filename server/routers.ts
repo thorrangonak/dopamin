@@ -26,13 +26,184 @@ import {
   getPendingWithdrawals, getUserWithdrawals, getAllWithdrawals,
   getUserDailyWithdrawalTotal,
   atomicDeductBalance,
+  // Provably fair
+  createProvablyFairSeed, getActiveSeed, incrementSeedNonce,
+  updateSeedClientSeed, revealSeed, getSeedById,
+  // Game sessions
+  createGameSession, getActiveGameSession, getGameSessionById,
+  completeGameSession, cancelGameSession,
+  // Responsible gambling
+  getResponsibleGamblingSettings, upsertResponsibleGamblingSettings,
+  addResponsibleGamblingLog, getResponsibleGamblingLogs,
+  getUserWagerTotal, getUserLossTotal,
+  // RTP
+  updateRtpTracking, getRtpReport, getRtpSummary, getAllCasinoGames,
 } from "./db";
 import { generateAddress } from "./lib/wallet/hdDerivation";
 import { NETWORKS, NETWORK_IDS, type NetworkId, getAutoApproveLimit, WITHDRAWAL_LIMITS } from "./lib/wallet/index";
 import { getAllDepositBalances, getHotWalletBalances, sweepAll } from "./lib/wallet/hotWallet";
 import { settleBets } from "./settlement";
-import { calculateCasinoResult } from "./casinoEngine";
+import {
+  playCoinFlip, playDice, playRoulette, playPlinko, playCrash,
+  generateMinePositions, calculateMinesMultiplier,
+  playRockPaperScissors, playBingo,
+  generateBlackjackDeck, handTotal, isBlackjack, dealerPlay, calculateBlackjackResult,
+  type BlackjackCard,
+  playKeno, playLimbo,
+  generateHiloDeck, calculateHiloMultiplier,
+  type HiloCard,
+} from "./casinoEngine";
+import {
+  generateServerSeed, hashServerSeed, generateGameHmac,
+} from "./provablyFair";
 import { invokeLLM } from "./_core/llm";
+import { TRPCError } from "@trpc/server";
+import crypto from "crypto";
+
+// ─── Helper: Get or create active seed for user ───
+async function ensureActiveSeed(userId: number) {
+  let seed = await getActiveSeed(userId);
+  if (!seed) {
+    const serverSeed = generateServerSeed();
+    const serverSeedHash = hashServerSeed(serverSeed);
+    const clientSeed = crypto.randomBytes(16).toString("hex");
+    const seedId = await createProvablyFairSeed(userId, serverSeed, serverSeedHash, clientSeed);
+    seed = await getSeedById(seedId!);
+  }
+  return seed!;
+}
+
+// ─── Helper: Run a single-round casino game with provably fair ───
+async function runCasinoGame(
+  userId: number,
+  gameType: string,
+  stake: number,
+  computeResult: (hmac: string) => { multiplier: number; details: Record<string, any> },
+) {
+  // 1. Check balance
+  const bal = await getOrCreateBalance(userId);
+  if (!bal || parseFloat(bal.amount) < stake) {
+    throw new TRPCError({ code: "BAD_REQUEST", message: "Yetersiz bakiye" });
+  }
+
+  // 2. Responsible gambling check
+  await checkResponsibleGambling(userId, stake);
+
+  // 3. Deduct stake
+  await updateBalance(userId, (-stake).toFixed(2));
+
+  // 4. Get seed, increment nonce, generate HMAC
+  const seed = await ensureActiveSeed(userId);
+  const nonce = await incrementSeedNonce(seed.id);
+  const hmac = generateGameHmac(seed.serverSeed, seed.clientSeed, nonce);
+
+  // 5. Compute result
+  const gameResult = computeResult(hmac);
+  const payout = stake * gameResult.multiplier;
+  const isWin = gameResult.multiplier > 0;
+
+  // 6. Credit winnings
+  if (isWin) {
+    await updateBalance(userId, payout.toFixed(2));
+  }
+
+  await addTransaction(
+    userId,
+    isWin ? "bet_win" : "bet_place",
+    isWin ? payout.toFixed(2) : stake.toFixed(2),
+    `Casino: ${gameType} - ${isWin ? "Kazanıldı" : "Kaybedildi"}`
+  );
+
+  // 7. Save game record
+  const gameId = await createCasinoGame(
+    userId, gameType, stake.toFixed(2),
+    gameResult.multiplier.toFixed(4), payout.toFixed(2),
+    isWin ? "win" : "loss",
+    { ...gameResult.details, serverSeedHash: seed.serverSeedHash, clientSeed: seed.clientSeed, nonce, hmac },
+  );
+
+  // 8. VIP XP
+  const xpEarned = Math.floor(stake / 10);
+  if (xpEarned > 0) {
+    await addVipXp(userId, xpEarned, stake);
+  }
+
+  // 9. RTP tracking
+  await updateRtpTracking(gameType, stake, payout);
+
+  const newBal = await getOrCreateBalance(userId);
+
+  return {
+    gameId,
+    result: isWin ? "win" as const : "loss" as const,
+    multiplier: gameResult.multiplier,
+    payout,
+    details: gameResult.details,
+    newBalance: newBal ? parseFloat(newBal.amount) : 0,
+    fairness: {
+      serverSeedHash: seed.serverSeedHash,
+      clientSeed: seed.clientSeed,
+      nonce,
+    },
+  };
+}
+
+// ─── Responsible gambling check ───
+async function checkResponsibleGambling(userId: number, wagerAmount: number) {
+  const settings = await getResponsibleGamblingSettings(userId);
+  if (!settings) return;
+
+  // Self-exclusion check
+  if (settings.selfExclusionUntil) {
+    if (settings.selfExclusionType === "permanent" || new Date(settings.selfExclusionUntil) > new Date()) {
+      throw new TRPCError({ code: "FORBIDDEN", message: "Hesabınız kendi isteğinizle kısıtlanmıştır. Kısıtlama süresi dolana kadar oyun oynayamazsınız." });
+    }
+  }
+
+  // Daily wager limit
+  if (settings.wagerLimitDaily) {
+    const dailyWager = await getUserWagerTotal(userId, 24);
+    if (dailyWager + wagerAmount > parseFloat(settings.wagerLimitDaily)) {
+      throw new TRPCError({ code: "FORBIDDEN", message: `Günlük bahis limitinize ulaştınız (${settings.wagerLimitDaily} USDT)` });
+    }
+  }
+  // Weekly wager limit
+  if (settings.wagerLimitWeekly) {
+    const weeklyWager = await getUserWagerTotal(userId, 168);
+    if (weeklyWager + wagerAmount > parseFloat(settings.wagerLimitWeekly)) {
+      throw new TRPCError({ code: "FORBIDDEN", message: `Haftalık bahis limitinize ulaştınız (${settings.wagerLimitWeekly} USDT)` });
+    }
+  }
+  // Monthly wager limit
+  if (settings.wagerLimitMonthly) {
+    const monthlyWager = await getUserWagerTotal(userId, 720);
+    if (monthlyWager + wagerAmount > parseFloat(settings.wagerLimitMonthly)) {
+      throw new TRPCError({ code: "FORBIDDEN", message: `Aylık bahis limitinize ulaştınız (${settings.wagerLimitMonthly} USDT)` });
+    }
+  }
+
+  // Daily loss limit
+  if (settings.lossLimitDaily) {
+    const dailyLoss = await getUserLossTotal(userId, 24);
+    if (dailyLoss > parseFloat(settings.lossLimitDaily)) {
+      throw new TRPCError({ code: "FORBIDDEN", message: `Günlük kayıp limitinize ulaştınız (${settings.lossLimitDaily} USDT)` });
+    }
+  }
+  // Weekly loss limit
+  if (settings.lossLimitWeekly) {
+    const weeklyLoss = await getUserLossTotal(userId, 168);
+    if (weeklyLoss > parseFloat(settings.lossLimitWeekly)) {
+      throw new TRPCError({ code: "FORBIDDEN", message: `Haftalık kayıp limitinize ulaştınız (${settings.lossLimitWeekly} USDT)` });
+    }
+  }
+  // Monthly loss limit
+  if (settings.lossLimitMonthly) {
+    const monthlyLoss = await getUserLossTotal(userId, 720);
+    if (monthlyLoss > parseFloat(settings.lossLimitMonthly)) {
+      throw new TRPCError({ code: "FORBIDDEN", message: `Aylık kayıp limitinize ulaştınız (${settings.lossLimitMonthly} USDT)` });
+    }
+  }
+}
 
 export const appRouter = router({
   system: systemRouter,
@@ -555,67 +726,1199 @@ export const appRouter = router({
 
   // ─── Casino Games ───
   casino: router({
-    play: protectedProcedure
+    // ── Per-game typed endpoints ──
+    playCoinFlip: protectedProcedure
       .input(z.object({
-        gameType: z.enum(["coinflip", "dice", "mines", "crash", "roulette", "plinko"]),
         stake: z.number().min(1).max(100000),
-        params: z.any(),
+        choice: z.enum(["heads", "tails"]),
       }))
       .mutation(async ({ ctx, input }) => {
-        const bal = await getOrCreateBalance(ctx.user.id);
-        if (!bal || parseFloat(bal.amount) < input.stake) {
-          throw new Error("Yetersiz bakiye");
+        return runCasinoGame(ctx.user.id, "coinflip", input.stake, (hmac) =>
+          playCoinFlip(hmac, { choice: input.choice })
+        );
+      }),
+
+    playDice: protectedProcedure
+      .input(z.object({
+        stake: z.number().min(1).max(100000),
+        target: z.number().min(2).max(95),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        return runCasinoGame(ctx.user.id, "dice", input.stake, (hmac) =>
+          playDice(hmac, { target: input.target })
+        );
+      }),
+
+    playRoulette: protectedProcedure
+      .input(z.object({
+        stake: z.number().min(1).max(100000),
+        betType: z.enum(["red", "black", "green", "number", "odd", "even", "high", "low"]),
+        number: z.number().min(0).max(36).optional(),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        return runCasinoGame(ctx.user.id, "roulette", input.stake, (hmac) =>
+          playRoulette(hmac, { betType: input.betType, number: input.number })
+        );
+      }),
+
+    playPlinko: protectedProcedure
+      .input(z.object({
+        stake: z.number().min(1).max(100000),
+        risk: z.enum(["low", "medium", "high"]),
+        rows: z.number().min(8).max(16),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        return runCasinoGame(ctx.user.id, "plinko", input.stake, (hmac) =>
+          playPlinko(hmac, { risk: input.risk, rows: input.rows })
+        );
+      }),
+
+    playCrash: protectedProcedure
+      .input(z.object({
+        stake: z.number().min(1).max(100000),
+        cashOutAt: z.number().min(1.01).max(1000000),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        return runCasinoGame(ctx.user.id, "crash", input.stake, (hmac) =>
+          playCrash(hmac, { cashOutAt: input.cashOutAt })
+        );
+      }),
+
+    playRPS: protectedProcedure
+      .input(z.object({
+        stake: z.number().min(1).max(100000),
+        choice: z.enum(["rock", "paper", "scissors"]),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        return runCasinoGame(ctx.user.id, "rps", input.stake, (hmac) =>
+          playRockPaperScissors(hmac, { choice: input.choice })
+        );
+      }),
+
+    playBingo: protectedProcedure
+      .input(z.object({
+        stake: z.number().min(1).max(100000),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        return runCasinoGame(ctx.user.id, "bingo", input.stake, (hmac) =>
+          playBingo(hmac, {})
+        );
+      }),
+
+    playKeno: protectedProcedure
+      .input(z.object({
+        stake: z.number().min(1).max(100000),
+        picks: z.array(z.number().min(1).max(40)).min(1).max(10),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        return runCasinoGame(ctx.user.id, "keno", input.stake, (hmac) =>
+          playKeno(hmac, { picks: input.picks })
+        );
+      }),
+
+    playLimbo: protectedProcedure
+      .input(z.object({
+        stake: z.number().min(1).max(100000),
+        target: z.number().min(1.01).max(1000000),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        return runCasinoGame(ctx.user.id, "limbo", input.stake, (hmac) =>
+          playLimbo(hmac, { target: input.target })
+        );
+      }),
+
+    // ── Mines (session-based) ──
+    startMines: protectedProcedure
+      .input(z.object({
+        stake: z.number().min(1).max(100000),
+        mineCount: z.number().min(1).max(24),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        const userId = ctx.user.id;
+
+        // Cancel any existing active session
+        const existingSession = await getActiveGameSession(userId, "mines");
+        if (existingSession) {
+          await cancelGameSession(existingSession.id);
         }
+
+        // Balance + responsible gambling check
+        const bal = await getOrCreateBalance(userId);
+        if (!bal || parseFloat(bal.amount) < input.stake) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "Yetersiz bakiye" });
+        }
+        await checkResponsibleGambling(userId, input.stake);
 
         // Deduct stake
-        await updateBalance(ctx.user.id, (-input.stake).toFixed(2));
+        await updateBalance(userId, (-input.stake).toFixed(2));
+        await addTransaction(userId, "bet_place", input.stake.toFixed(2), "Casino: mines - Oyun başlatıldı");
 
-        // Calculate result based on game type
-        const gameResult = calculateCasinoResult(input.gameType, input.params);
+        // Generate mine positions using provably fair
+        const seed = await ensureActiveSeed(userId);
+        const nonce = await incrementSeedNonce(seed.id);
+        const hmac = generateGameHmac(seed.serverSeed, seed.clientSeed, nonce);
+        const minePositions = generateMinePositions(hmac, input.mineCount);
 
-        const payout = input.stake * gameResult.multiplier;
-        const isWin = gameResult.multiplier > 0;
+        // Commit hash for the mine positions
+        const commitHash = crypto.createHash("sha256")
+          .update(JSON.stringify(minePositions))
+          .digest("hex");
 
-        if (isWin) {
+        // Create session
+        const sessionId = await createGameSession({
+          userId,
+          gameType: "mines",
+          stake: input.stake.toFixed(2),
+          serverSeedId: seed.id,
+          nonce,
+          gameData: { minePositions, mineCount: input.mineCount, revealedCells: [], hmac },
+          commitHash,
+        });
+
+        const newBal = await getOrCreateBalance(userId);
+
+        return {
+          sessionId,
+          commitHash,
+          mineCount: input.mineCount,
+          newBalance: newBal ? parseFloat(newBal.amount) : 0,
+          fairness: {
+            serverSeedHash: seed.serverSeedHash,
+            clientSeed: seed.clientSeed,
+            nonce,
+          },
+        };
+      }),
+
+    revealMine: protectedProcedure
+      .input(z.object({
+        sessionId: z.number(),
+        cellIndex: z.number().min(0).max(24),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        const session = await getGameSessionById(input.sessionId);
+        if (!session || session.userId !== ctx.user.id || session.status !== "active") {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "Geçersiz oyun oturumu" });
+        }
+
+        const gameData = session.gameData as any;
+        const minePositions: number[] = gameData.minePositions;
+        const revealedCells: number[] = gameData.revealedCells || [];
+
+        if (revealedCells.includes(input.cellIndex)) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "Bu hücre zaten açılmış" });
+        }
+
+        const isMine = minePositions.includes(input.cellIndex);
+        revealedCells.push(input.cellIndex);
+
+        if (isMine) {
+          // Hit mine — game over, loss
+          await completeGameSession(input.sessionId, "loss", "0", "0");
+
+          // Save game record
+          await createCasinoGame(
+            ctx.user.id, "mines", session.stake,
+            "0", "0", "loss",
+            { ...gameData, revealedCells, hitMine: true, hitCell: input.cellIndex },
+          );
+
+          // RTP tracking
+          await updateRtpTracking("mines", parseFloat(session.stake), 0);
+
+          // VIP XP
+          const xpEarned = Math.floor(parseFloat(session.stake) / 10);
+          if (xpEarned > 0) await addVipXp(ctx.user.id, xpEarned, parseFloat(session.stake));
+
+          return {
+            isMine: true,
+            gameOver: true,
+            minePositions,
+            revealedCells,
+            multiplier: 0,
+            payout: 0,
+          };
+        }
+
+        // Safe cell — update session gameData
+        const newMultiplier = calculateMinesMultiplier(revealedCells.length, gameData.mineCount);
+        const safeTotal = 25 - gameData.mineCount;
+        const allRevealed = revealedCells.length >= safeTotal;
+
+        // Update game data in session
+        const updatedGameData = { ...gameData, revealedCells };
+
+        // If all safe cells revealed, auto cash out
+        if (allRevealed) {
+          const payout = parseFloat(session.stake) * newMultiplier;
+          await completeGameSession(input.sessionId, "win", newMultiplier.toFixed(4), payout.toFixed(2));
           await updateBalance(ctx.user.id, payout.toFixed(2));
+          await addTransaction(ctx.user.id, "bet_win", payout.toFixed(2), `Casino: mines - Tüm hücreler açıldı (${newMultiplier}x)`);
+
+          await createCasinoGame(
+            ctx.user.id, "mines", session.stake,
+            newMultiplier.toFixed(4), payout.toFixed(2), "win",
+            { ...updatedGameData, cashOut: true, minePositions },
+          );
+          await updateRtpTracking("mines", parseFloat(session.stake), payout);
+          const xpEarned = Math.floor(parseFloat(session.stake) / 10);
+          if (xpEarned > 0) await addVipXp(ctx.user.id, xpEarned, parseFloat(session.stake));
+
+          const newBal = await getOrCreateBalance(ctx.user.id);
+          return {
+            isMine: false,
+            gameOver: true,
+            minePositions,
+            revealedCells,
+            multiplier: newMultiplier,
+            payout,
+            newBalance: newBal ? parseFloat(newBal.amount) : 0,
+          };
         }
 
-        await addTransaction(
-          ctx.user.id,
-          isWin ? "bet_win" : "bet_place",
-          isWin ? payout.toFixed(2) : input.stake.toFixed(2),
-          `Casino: ${input.gameType} - ${isWin ? "Kazanıldı" : "Kaybedildi"}`
-        );
-
-        const gameId = await createCasinoGame(
-          ctx.user.id,
-          input.gameType,
-          input.stake.toFixed(2),
-          gameResult.multiplier.toFixed(4),
-          payout.toFixed(2),
-          isWin ? "win" : "loss",
-          gameResult.details
-        );
-
-        // Award VIP XP: 1 XP per 10₺ wagered
-        const xpEarned = Math.floor(input.stake / 10);
-        if (xpEarned > 0) {
-          await addVipXp(ctx.user.id, xpEarned, input.stake);
+        // Game continues — update gameData on session (just update via raw SQL for JSON)
+        const { getDb } = await import("./db");
+        const db = await getDb();
+        if (db) {
+          const { casinoGameSessions } = await import("../drizzle/schema");
+          const { eq } = await import("drizzle-orm");
+          await db.update(casinoGameSessions)
+            .set({ gameData: updatedGameData })
+            .where(eq(casinoGameSessions.id, input.sessionId));
         }
+
+        return {
+          isMine: false,
+          gameOver: false,
+          revealedCells,
+          multiplier: newMultiplier,
+          nextMultiplier: calculateMinesMultiplier(revealedCells.length + 1, gameData.mineCount),
+          payout: parseFloat(session.stake) * newMultiplier,
+        };
+      }),
+
+    cashOutMines: protectedProcedure
+      .input(z.object({ sessionId: z.number() }))
+      .mutation(async ({ ctx, input }) => {
+        const session = await getGameSessionById(input.sessionId);
+        if (!session || session.userId !== ctx.user.id || session.status !== "active") {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "Geçersiz oyun oturumu" });
+        }
+
+        const gameData = session.gameData as any;
+        const revealedCells: number[] = gameData.revealedCells || [];
+
+        if (revealedCells.length === 0) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "En az bir hücre açmalısınız" });
+        }
+
+        const multiplier = calculateMinesMultiplier(revealedCells.length, gameData.mineCount);
+        const payout = parseFloat(session.stake) * multiplier;
+
+        await completeGameSession(input.sessionId, "win", multiplier.toFixed(4), payout.toFixed(2));
+        await updateBalance(ctx.user.id, payout.toFixed(2));
+        await addTransaction(ctx.user.id, "bet_win", payout.toFixed(2), `Casino: mines - Cash Out (${multiplier}x)`);
+
+        await createCasinoGame(
+          ctx.user.id, "mines", session.stake,
+          multiplier.toFixed(4), payout.toFixed(2), "win",
+          { ...gameData, cashOut: true, minePositions: gameData.minePositions },
+        );
+        await updateRtpTracking("mines", parseFloat(session.stake), payout);
+        const xpEarned = Math.floor(parseFloat(session.stake) / 10);
+        if (xpEarned > 0) await addVipXp(ctx.user.id, xpEarned, parseFloat(session.stake));
 
         const newBal = await getOrCreateBalance(ctx.user.id);
 
         return {
-          gameId,
-          result: isWin ? "win" as const : "loss" as const,
-          multiplier: gameResult.multiplier,
+          multiplier,
           payout,
-          details: gameResult.details,
+          minePositions: gameData.minePositions,
+          revealedCells,
           newBalance: newBal ? parseFloat(newBal.amount) : 0,
         };
       }),
+
+    getActiveSession: protectedProcedure.query(async ({ ctx }) => {
+      const session = await getActiveGameSession(ctx.user.id, "mines");
+      if (!session) return null;
+      const gameData = session.gameData as any;
+      const revealedCells: number[] = gameData.revealedCells || [];
+      return {
+        sessionId: session.id,
+        mineCount: gameData.mineCount,
+        stake: parseFloat(session.stake),
+        revealedCells,
+        multiplier: revealedCells.length > 0 ? calculateMinesMultiplier(revealedCells.length, gameData.mineCount) : 0,
+        nextMultiplier: calculateMinesMultiplier(revealedCells.length + 1, gameData.mineCount),
+        commitHash: session.commitHash,
+      };
+    }),
+
+    // ── Crash (session-based with manual cashout) ──
+    startCrash: protectedProcedure
+      .input(z.object({
+        stake: z.number().min(1).max(100000),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        const userId = ctx.user.id;
+
+        // Cancel any existing active crash session
+        const existingSession = await getActiveGameSession(userId, "crash");
+        if (existingSession) {
+          await cancelGameSession(existingSession.id);
+        }
+
+        // Balance + responsible gambling check
+        const bal = await getOrCreateBalance(userId);
+        if (!bal || parseFloat(bal.amount) < input.stake) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "Yetersiz bakiye" });
+        }
+        await checkResponsibleGambling(userId, input.stake);
+
+        // Deduct stake
+        await updateBalance(userId, (-input.stake).toFixed(2));
+        await addTransaction(userId, "bet_place", input.stake.toFixed(2), "Casino: crash - Oyun başlatıldı");
+
+        // Generate crash point using provably fair
+        const seed = await ensureActiveSeed(userId);
+        const nonce = await incrementSeedNonce(seed.id);
+        const hmac = generateGameHmac(seed.serverSeed, seed.clientSeed, nonce);
+
+        // Compute crash point (same logic as playCrash engine)
+        const h = parseInt(hmac.substring(0, 8), 16);
+        let crashPoint: number;
+        if (h % 33 === 0) {
+          crashPoint = 1.0;
+        } else {
+          crashPoint = parseFloat(Math.max(1.0, (0.97 * 0x100000000) / (h + 1)).toFixed(2));
+        }
+
+        // Commit hash = SHA256(crashPoint) — client can verify later
+        const commitHash = crypto.createHash("sha256")
+          .update(String(crashPoint))
+          .digest("hex");
+
+        // Create session — crashPoint is stored server-side, NOT sent to client
+        const sessionId = await createGameSession({
+          userId,
+          gameType: "crash",
+          stake: input.stake.toFixed(2),
+          serverSeedId: seed.id,
+          nonce,
+          gameData: { crashPoint, stake: input.stake, hmac },
+          commitHash,
+        });
+
+        const newBal = await getOrCreateBalance(userId);
+
+        return {
+          sessionId,
+          commitHash,
+          newBalance: newBal ? parseFloat(newBal.amount) : 0,
+          fairness: {
+            serverSeedHash: seed.serverSeedHash,
+            clientSeed: seed.clientSeed,
+            nonce,
+          },
+        };
+      }),
+
+    crashCashOut: protectedProcedure
+      .input(z.object({
+        sessionId: z.number(),
+        cashOutAt: z.number().min(1.0),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        const session = await getGameSessionById(input.sessionId);
+        if (!session || session.userId !== ctx.user.id || session.status !== "active") {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "Geçersiz oyun oturumu" });
+        }
+
+        const gameData = session.gameData as any;
+        const crashPoint: number = gameData.crashPoint;
+        const stakeAmount = parseFloat(session.stake);
+
+        const won = input.cashOutAt <= crashPoint;
+        const multiplier = won ? input.cashOutAt : 0;
+        const payout = won ? stakeAmount * input.cashOutAt : 0;
+
+        // Complete session
+        await completeGameSession(
+          input.sessionId,
+          won ? "win" : "loss",
+          multiplier.toFixed(4),
+          payout.toFixed(2),
+        );
+
+        // Credit winnings
+        if (won) {
+          await updateBalance(ctx.user.id, payout.toFixed(2));
+          await addTransaction(ctx.user.id, "bet_win", payout.toFixed(2), `Casino: crash - Cash Out (${input.cashOutAt.toFixed(2)}x)`);
+        } else {
+          await addTransaction(ctx.user.id, "bet_place", stakeAmount.toFixed(2), `Casino: crash - Patladı (${crashPoint}x)`);
+        }
+
+        // Save game record
+        await createCasinoGame(
+          ctx.user.id, "crash", session.stake,
+          multiplier.toFixed(4), payout.toFixed(2),
+          won ? "win" : "loss",
+          { crashPoint, cashOutAt: input.cashOutAt, won, hmac: gameData.hmac },
+        );
+
+        // RTP tracking
+        await updateRtpTracking("crash", stakeAmount, payout);
+
+        // VIP XP
+        const xpEarned = Math.floor(stakeAmount / 10);
+        if (xpEarned > 0) await addVipXp(ctx.user.id, xpEarned, stakeAmount);
+
+        const newBal = await getOrCreateBalance(ctx.user.id);
+
+        return {
+          won,
+          crashPoint,
+          multiplier,
+          payout,
+          newBalance: newBal ? parseFloat(newBal.amount) : 0,
+        };
+      }),
+
+    getActiveCrashSession: protectedProcedure.query(async ({ ctx }) => {
+      const session = await getActiveGameSession(ctx.user.id, "crash");
+      if (!session) return null;
+      return {
+        sessionId: session.id,
+        stake: parseFloat(session.stake),
+        commitHash: session.commitHash,
+      };
+    }),
+
+    // ── Blackjack (session-based) ──
+    startBlackjack: protectedProcedure
+      .input(z.object({
+        stake: z.number().min(1).max(100000),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        const userId = ctx.user.id;
+
+        // Cancel any existing active blackjack session
+        const existingSession = await getActiveGameSession(userId, "blackjack");
+        if (existingSession) {
+          await cancelGameSession(existingSession.id);
+        }
+
+        // Balance + responsible gambling check
+        const bal = await getOrCreateBalance(userId);
+        if (!bal || parseFloat(bal.amount) < input.stake) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "Yetersiz bakiye" });
+        }
+        await checkResponsibleGambling(userId, input.stake);
+
+        // Deduct stake
+        await updateBalance(userId, (-input.stake).toFixed(2));
+        await addTransaction(userId, "bet_place", input.stake.toFixed(2), "Casino: blackjack - Oyun başlatıldı");
+
+        // Generate deck using provably fair
+        const seed = await ensureActiveSeed(userId);
+        const nonce = await incrementSeedNonce(seed.id);
+        const hmac = generateGameHmac(seed.serverSeed, seed.clientSeed, nonce);
+        const deck = generateBlackjackDeck(hmac);
+
+        // Deal: player gets cards 0,2; dealer gets 1,3
+        const playerCards = [deck[0], deck[2]];
+        const dealerCards = [deck[1], deck[3]];
+        let nextIdx = 4;
+
+        const commitHash = crypto.createHash("sha256")
+          .update(JSON.stringify(deck.map(c => `${c.rank}${c.suit}`)))
+          .digest("hex");
+
+        // Check for naturals (blackjack)
+        const playerBJ = isBlackjack(playerCards);
+        const dealerBJ = isBlackjack(dealerCards);
+
+        if (playerBJ || dealerBJ) {
+          // Instant resolve
+          const bjResult = calculateBlackjackResult(playerCards, dealerCards, false);
+          const payout = input.stake * bjResult.multiplier;
+          const isWin = bjResult.multiplier > 0;
+
+          if (isWin) {
+            await updateBalance(userId, payout.toFixed(2));
+          }
+          await addTransaction(
+            userId, isWin ? "bet_win" : "bet_place",
+            isWin ? payout.toFixed(2) : input.stake.toFixed(2),
+            `Casino: blackjack - ${bjResult.result === "blackjack" ? "Blackjack!" : bjResult.result === "push" ? "Push" : "Kaybedildi"}`
+          );
+
+          await createCasinoGame(
+            userId, "blackjack", input.stake.toFixed(2),
+            bjResult.multiplier.toFixed(4), payout.toFixed(2),
+            bjResult.multiplier > 1 ? "win" : bjResult.multiplier === 1 ? "win" : "loss",
+            { playerCards, dealerCards, result: bjResult.result, hmac },
+          );
+          await updateRtpTracking("blackjack", input.stake, payout);
+          const xpEarned = Math.floor(input.stake / 10);
+          if (xpEarned > 0) await addVipXp(userId, xpEarned, input.stake);
+
+          const newBal = await getOrCreateBalance(userId);
+          return {
+            sessionId: null,
+            gameOver: true,
+            playerCards,
+            dealerCards,
+            playerTotal: handTotal(playerCards),
+            dealerTotal: handTotal(dealerCards),
+            result: bjResult.result,
+            multiplier: bjResult.multiplier,
+            payout,
+            newBalance: newBal ? parseFloat(newBal.amount) : 0,
+            commitHash,
+            fairness: { serverSeedHash: seed.serverSeedHash, clientSeed: seed.clientSeed, nonce },
+          };
+        }
+
+        // Create session — game continues
+        const sessionId = await createGameSession({
+          userId,
+          gameType: "blackjack",
+          stake: input.stake.toFixed(2),
+          serverSeedId: seed.id,
+          nonce,
+          gameData: { deck, playerCards, dealerCards, nextIdx, isDouble: false, hmac },
+          commitHash,
+        });
+
+        const newBal = await getOrCreateBalance(userId);
+
+        return {
+          sessionId,
+          gameOver: false,
+          playerCards,
+          dealerCards: [dealerCards[0]], // Hide hole card
+          playerTotal: handTotal(playerCards),
+          dealerTotal: dealerCards[0].value,
+          result: null,
+          multiplier: null,
+          payout: null,
+          newBalance: newBal ? parseFloat(newBal.amount) : 0,
+          commitHash,
+          fairness: { serverSeedHash: seed.serverSeedHash, clientSeed: seed.clientSeed, nonce },
+        };
+      }),
+
+    blackjackAction: protectedProcedure
+      .input(z.object({
+        sessionId: z.number(),
+        action: z.enum(["hit", "stand", "double"]),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        const session = await getGameSessionById(input.sessionId);
+        if (!session || session.userId !== ctx.user.id || session.status !== "active") {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "Geçersiz oyun oturumu" });
+        }
+
+        const gameData = session.gameData as any;
+        let { deck, playerCards, dealerCards, nextIdx, isDouble } = gameData as {
+          deck: BlackjackCard[];
+          playerCards: BlackjackCard[];
+          dealerCards: BlackjackCard[];
+          nextIdx: number;
+          isDouble: boolean;
+        };
+
+        const stakeAmount = parseFloat(session.stake);
+
+        if (input.action === "double") {
+          // Check balance for double
+          const bal = await getOrCreateBalance(ctx.user.id);
+          if (!bal || parseFloat(bal.amount) < stakeAmount) {
+            throw new TRPCError({ code: "BAD_REQUEST", message: "Double için yetersiz bakiye" });
+          }
+          await updateBalance(ctx.user.id, (-stakeAmount).toFixed(2));
+          await addTransaction(ctx.user.id, "bet_place", stakeAmount.toFixed(2), "Casino: blackjack - Double Down");
+          isDouble = true;
+
+          // Deal one card, then auto-stand
+          playerCards = [...playerCards, deck[nextIdx++]];
+          const playerTotal = handTotal(playerCards);
+
+          if (playerTotal > 21) {
+            // Bust
+            await completeGameSession(input.sessionId, "loss", "0", "0");
+            await createCasinoGame(
+              ctx.user.id, "blackjack", (stakeAmount * 2).toFixed(2),
+              "0", "0", "loss",
+              { playerCards, dealerCards, result: "loss", bust: true, isDouble: true, hmac: gameData.hmac },
+            );
+            await updateRtpTracking("blackjack", stakeAmount * 2, 0);
+            const xpEarned = Math.floor((stakeAmount * 2) / 10);
+            if (xpEarned > 0) await addVipXp(ctx.user.id, xpEarned, stakeAmount * 2);
+
+            return {
+              gameOver: true,
+              playerCards,
+              dealerCards,
+              playerTotal,
+              dealerTotal: handTotal(dealerCards),
+              result: "loss" as const,
+              multiplier: 0,
+              payout: 0,
+              newBalance: (await getOrCreateBalance(ctx.user.id))?.amount ? parseFloat((await getOrCreateBalance(ctx.user.id))!.amount) : 0,
+            };
+          }
+
+          // Auto stand — dealer plays
+          const dealerResult = dealerPlay(deck, dealerCards, nextIdx);
+          dealerCards = dealerResult.dealerCards;
+          nextIdx = dealerResult.nextIdx;
+
+          const bjResult = calculateBlackjackResult(playerCards, dealerCards, true);
+          const totalStake = stakeAmount * 2;
+          const payout = totalStake / 2 * bjResult.multiplier; // multiplier already accounts for double
+          const isWin = bjResult.multiplier > 0;
+
+          await completeGameSession(input.sessionId, isWin ? "win" : "loss", bjResult.multiplier.toFixed(4), payout.toFixed(2));
+          if (isWin) await updateBalance(ctx.user.id, payout.toFixed(2));
+          await addTransaction(
+            ctx.user.id, isWin ? "bet_win" : "bet_place",
+            isWin ? payout.toFixed(2) : totalStake.toFixed(2),
+            `Casino: blackjack - ${bjResult.result === "push" ? "Push" : isWin ? "Kazanıldı" : "Kaybedildi"} (Double)`
+          );
+
+          await createCasinoGame(
+            ctx.user.id, "blackjack", totalStake.toFixed(2),
+            bjResult.multiplier.toFixed(4), payout.toFixed(2),
+            isWin ? "win" : "loss",
+            { playerCards, dealerCards, result: bjResult.result, isDouble: true, hmac: gameData.hmac },
+          );
+          await updateRtpTracking("blackjack", totalStake, payout);
+          const xpEarned = Math.floor(totalStake / 10);
+          if (xpEarned > 0) await addVipXp(ctx.user.id, xpEarned, totalStake);
+
+          const newBal = await getOrCreateBalance(ctx.user.id);
+          return {
+            gameOver: true,
+            playerCards,
+            dealerCards,
+            playerTotal: handTotal(playerCards),
+            dealerTotal: handTotal(dealerCards),
+            result: bjResult.result,
+            multiplier: bjResult.multiplier,
+            payout,
+            newBalance: newBal ? parseFloat(newBal.amount) : 0,
+          };
+        }
+
+        if (input.action === "hit") {
+          playerCards = [...playerCards, deck[nextIdx++]];
+          const playerTotal = handTotal(playerCards);
+
+          if (playerTotal > 21) {
+            // Bust
+            await completeGameSession(input.sessionId, "loss", "0", "0");
+            await createCasinoGame(
+              ctx.user.id, "blackjack", session.stake,
+              "0", "0", "loss",
+              { playerCards, dealerCards, result: "loss", bust: true, hmac: gameData.hmac },
+            );
+            await updateRtpTracking("blackjack", stakeAmount, 0);
+            const xpEarned = Math.floor(stakeAmount / 10);
+            if (xpEarned > 0) await addVipXp(ctx.user.id, xpEarned, stakeAmount);
+
+            return {
+              gameOver: true,
+              playerCards,
+              dealerCards,
+              playerTotal,
+              dealerTotal: handTotal(dealerCards),
+              result: "loss" as const,
+              multiplier: 0,
+              payout: 0,
+              newBalance: (await getOrCreateBalance(ctx.user.id))?.amount ? parseFloat((await getOrCreateBalance(ctx.user.id))!.amount) : 0,
+            };
+          }
+
+          // Game continues — update session
+          const { getDb } = await import("./db");
+          const db = await getDb();
+          if (db) {
+            const { casinoGameSessions } = await import("../drizzle/schema");
+            const { eq } = await import("drizzle-orm");
+            await db.update(casinoGameSessions)
+              .set({ gameData: { ...gameData, playerCards, nextIdx, isDouble } })
+              .where(eq(casinoGameSessions.id, input.sessionId));
+          }
+
+          return {
+            gameOver: false,
+            playerCards,
+            dealerCards: [dealerCards[0]], // Still hide hole card
+            playerTotal,
+            dealerTotal: dealerCards[0].value,
+            result: null,
+            multiplier: null,
+            payout: null,
+          };
+        }
+
+        // Stand — dealer plays
+        const dealerResult = dealerPlay(deck, dealerCards, nextIdx);
+        dealerCards = dealerResult.dealerCards;
+
+        const bjResult = calculateBlackjackResult(playerCards, dealerCards, isDouble);
+        const payout = stakeAmount * bjResult.multiplier;
+        const isWin = bjResult.multiplier > 0;
+
+        await completeGameSession(input.sessionId, isWin ? "win" : "loss", bjResult.multiplier.toFixed(4), payout.toFixed(2));
+        if (isWin) await updateBalance(ctx.user.id, payout.toFixed(2));
+        await addTransaction(
+          ctx.user.id, isWin ? "bet_win" : "bet_place",
+          isWin ? payout.toFixed(2) : stakeAmount.toFixed(2),
+          `Casino: blackjack - ${bjResult.result === "push" ? "Push" : isWin ? "Kazanıldı" : "Kaybedildi"}`
+        );
+
+        await createCasinoGame(
+          ctx.user.id, "blackjack", session.stake,
+          bjResult.multiplier.toFixed(4), payout.toFixed(2),
+          isWin ? "win" : "loss",
+          { playerCards, dealerCards, result: bjResult.result, hmac: gameData.hmac },
+        );
+        await updateRtpTracking("blackjack", stakeAmount, payout);
+        const xpEarned = Math.floor(stakeAmount / 10);
+        if (xpEarned > 0) await addVipXp(ctx.user.id, xpEarned, stakeAmount);
+
+        const newBal = await getOrCreateBalance(ctx.user.id);
+        return {
+          gameOver: true,
+          playerCards,
+          dealerCards,
+          playerTotal: handTotal(playerCards),
+          dealerTotal: handTotal(dealerCards),
+          result: bjResult.result,
+          multiplier: bjResult.multiplier,
+          payout,
+          newBalance: newBal ? parseFloat(newBal.amount) : 0,
+        };
+      }),
+
+    getActiveBlackjackSession: protectedProcedure.query(async ({ ctx }) => {
+      const session = await getActiveGameSession(ctx.user.id, "blackjack");
+      if (!session) return null;
+      const gameData = session.gameData as any;
+      return {
+        sessionId: session.id,
+        stake: parseFloat(session.stake),
+        playerCards: gameData.playerCards,
+        dealerCards: [gameData.dealerCards[0]], // Hide hole card
+        playerTotal: handTotal(gameData.playerCards),
+        dealerTotal: gameData.dealerCards[0].value,
+        commitHash: session.commitHash,
+      };
+    }),
+
+    // ── Hilo (session-based) ──
+    startHilo: protectedProcedure
+      .input(z.object({
+        stake: z.number().min(1).max(100000),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        const userId = ctx.user.id;
+
+        // Cancel any existing active hilo session
+        const existingSession = await getActiveGameSession(userId, "hilo");
+        if (existingSession) {
+          await cancelGameSession(existingSession.id);
+        }
+
+        // Balance + responsible gambling check
+        const bal = await getOrCreateBalance(userId);
+        if (!bal || parseFloat(bal.amount) < input.stake) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "Yetersiz bakiye" });
+        }
+        await checkResponsibleGambling(userId, input.stake);
+
+        // Deduct stake
+        await updateBalance(userId, (-input.stake).toFixed(2));
+        await addTransaction(userId, "bet_place", input.stake.toFixed(2), "Casino: hilo - Oyun başlatıldı");
+
+        // Generate deck using provably fair
+        const seed = await ensureActiveSeed(userId);
+        const nonce = await incrementSeedNonce(seed.id);
+        const hmac = generateGameHmac(seed.serverSeed, seed.clientSeed, nonce);
+        const deck = generateHiloDeck(hmac);
+
+        const commitHash = crypto.createHash("sha256")
+          .update(JSON.stringify(deck.map(c => `${c.rank}${c.suit}`)))
+          .digest("hex");
+
+        // First card is revealed
+        const currentCard = deck[0];
+
+        const sessionId = await createGameSession({
+          userId,
+          gameType: "hilo",
+          stake: input.stake.toFixed(2),
+          serverSeedId: seed.id,
+          nonce,
+          gameData: { deck, currentCardIdx: 0, correctGuesses: 0, currentMultiplier: 1, hmac },
+          commitHash,
+        });
+
+        const newBal = await getOrCreateBalance(userId);
+
+        return {
+          sessionId,
+          currentCard,
+          commitHash,
+          newBalance: newBal ? parseFloat(newBal.amount) : 0,
+          fairness: { serverSeedHash: seed.serverSeedHash, clientSeed: seed.clientSeed, nonce },
+        };
+      }),
+
+    hiloGuess: protectedProcedure
+      .input(z.object({
+        sessionId: z.number(),
+        guess: z.enum(["higher", "lower"]),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        const session = await getGameSessionById(input.sessionId);
+        if (!session || session.userId !== ctx.user.id || session.status !== "active") {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "Geçersiz oyun oturumu" });
+        }
+
+        const gameData = session.gameData as any;
+        const deck: HiloCard[] = gameData.deck;
+        let { currentCardIdx, correctGuesses, currentMultiplier } = gameData as {
+          currentCardIdx: number;
+          correctGuesses: number;
+          currentMultiplier: number;
+        };
+
+        const currentCard = deck[currentCardIdx];
+        const nextCardIdx = currentCardIdx + 1;
+
+        if (nextCardIdx >= deck.length) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "Deste bitti" });
+        }
+
+        const nextCard = deck[nextCardIdx];
+
+        // Determine if guess is correct (strict: equal = loss)
+        const isCorrect =
+          (input.guess === "higher" && nextCard.numericValue > currentCard.numericValue) ||
+          (input.guess === "lower" && nextCard.numericValue < currentCard.numericValue);
+
+        if (!isCorrect) {
+          // Wrong guess — game over, loss
+          await completeGameSession(input.sessionId, "loss", "0", "0");
+          await createCasinoGame(
+            ctx.user.id, "hilo", session.stake,
+            "0", "0", "loss",
+            { currentCard, nextCard, guess: input.guess, correctGuesses, hmac: gameData.hmac },
+          );
+          await updateRtpTracking("hilo", parseFloat(session.stake), 0);
+          const xpEarned = Math.floor(parseFloat(session.stake) / 10);
+          if (xpEarned > 0) await addVipXp(ctx.user.id, xpEarned, parseFloat(session.stake));
+
+          return {
+            correct: false,
+            gameOver: true,
+            currentCard,
+            nextCard,
+            correctGuesses,
+            multiplier: 0,
+            payout: 0,
+          };
+        }
+
+        // Correct guess
+        const roundMultiplier = calculateHiloMultiplier(currentCard, input.guess);
+        correctGuesses++;
+        currentMultiplier = parseFloat((currentMultiplier * roundMultiplier).toFixed(4));
+
+        // Update session
+        const { getDb } = await import("./db");
+        const db = await getDb();
+        if (db) {
+          const { casinoGameSessions } = await import("../drizzle/schema");
+          const { eq } = await import("drizzle-orm");
+          await db.update(casinoGameSessions)
+            .set({ gameData: { ...gameData, currentCardIdx: nextCardIdx, correctGuesses, currentMultiplier } })
+            .where(eq(casinoGameSessions.id, input.sessionId));
+        }
+
+        // Check if deck is about to run out (auto cash out at 51 cards)
+        if (nextCardIdx >= 50) {
+          const payout = parseFloat(session.stake) * currentMultiplier;
+          await completeGameSession(input.sessionId, "win", currentMultiplier.toFixed(4), payout.toFixed(2));
+          await updateBalance(ctx.user.id, payout.toFixed(2));
+          await addTransaction(ctx.user.id, "bet_win", payout.toFixed(2), `Casino: hilo - Deste bitti! (${currentMultiplier}x)`);
+          await createCasinoGame(
+            ctx.user.id, "hilo", session.stake,
+            currentMultiplier.toFixed(4), payout.toFixed(2), "win",
+            { correctGuesses, currentMultiplier, hmac: gameData.hmac },
+          );
+          await updateRtpTracking("hilo", parseFloat(session.stake), payout);
+          const xpEarned = Math.floor(parseFloat(session.stake) / 10);
+          if (xpEarned > 0) await addVipXp(ctx.user.id, xpEarned, parseFloat(session.stake));
+
+          const newBal = await getOrCreateBalance(ctx.user.id);
+          return {
+            correct: true,
+            gameOver: true,
+            currentCard,
+            nextCard,
+            correctGuesses,
+            multiplier: currentMultiplier,
+            payout,
+            newBalance: newBal ? parseFloat(newBal.amount) : 0,
+          };
+        }
+
+        return {
+          correct: true,
+          gameOver: false,
+          currentCard,
+          nextCard,
+          correctGuesses,
+          multiplier: currentMultiplier,
+          payout: parseFloat(session.stake) * currentMultiplier,
+          nextMultiplierHigher: calculateHiloMultiplier(nextCard, "higher"),
+          nextMultiplierLower: calculateHiloMultiplier(nextCard, "lower"),
+        };
+      }),
+
+    cashOutHilo: protectedProcedure
+      .input(z.object({ sessionId: z.number() }))
+      .mutation(async ({ ctx, input }) => {
+        const session = await getGameSessionById(input.sessionId);
+        if (!session || session.userId !== ctx.user.id || session.status !== "active") {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "Geçersiz oyun oturumu" });
+        }
+
+        const gameData = session.gameData as any;
+        const { correctGuesses, currentMultiplier } = gameData;
+
+        if (correctGuesses === 0) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "En az bir doğru tahmin yapmalısınız" });
+        }
+
+        const payout = parseFloat(session.stake) * currentMultiplier;
+
+        await completeGameSession(input.sessionId, "win", currentMultiplier.toFixed(4), payout.toFixed(2));
+        await updateBalance(ctx.user.id, payout.toFixed(2));
+        await addTransaction(ctx.user.id, "bet_win", payout.toFixed(2), `Casino: hilo - Cash Out (${currentMultiplier}x)`);
+
+        await createCasinoGame(
+          ctx.user.id, "hilo", session.stake,
+          currentMultiplier.toFixed(4), payout.toFixed(2), "win",
+          { correctGuesses, currentMultiplier, cashOut: true, hmac: gameData.hmac },
+        );
+        await updateRtpTracking("hilo", parseFloat(session.stake), payout);
+        const xpEarned = Math.floor(parseFloat(session.stake) / 10);
+        if (xpEarned > 0) await addVipXp(ctx.user.id, xpEarned, parseFloat(session.stake));
+
+        const newBal = await getOrCreateBalance(ctx.user.id);
+
+        return {
+          multiplier: currentMultiplier,
+          payout,
+          correctGuesses,
+          newBalance: newBal ? parseFloat(newBal.amount) : 0,
+        };
+      }),
+
+    getActiveHiloSession: protectedProcedure.query(async ({ ctx }) => {
+      const session = await getActiveGameSession(ctx.user.id, "hilo");
+      if (!session) return null;
+      const gameData = session.gameData as any;
+      const deck: HiloCard[] = gameData.deck;
+      const currentCard = deck[gameData.currentCardIdx];
+      return {
+        sessionId: session.id,
+        stake: parseFloat(session.stake),
+        currentCard,
+        correctGuesses: gameData.correctGuesses,
+        currentMultiplier: gameData.currentMultiplier,
+        commitHash: session.commitHash,
+        nextMultiplierHigher: calculateHiloMultiplier(currentCard, "higher"),
+        nextMultiplierLower: calculateHiloMultiplier(currentCard, "lower"),
+      };
+    }),
+
+    // ── Seed Management ──
+    getActiveSeed: protectedProcedure.query(async ({ ctx }) => {
+      const seed = await ensureActiveSeed(ctx.user.id);
+      return {
+        serverSeedHash: seed.serverSeedHash,
+        clientSeed: seed.clientSeed,
+        nonce: seed.nonce,
+      };
+    }),
+
+    setClientSeed: protectedProcedure
+      .input(z.object({ clientSeed: z.string().min(1).max(64) }))
+      .mutation(async ({ ctx, input }) => {
+        const seed = await ensureActiveSeed(ctx.user.id);
+        await updateSeedClientSeed(seed.id, input.clientSeed);
+        return { success: true };
+      }),
+
+    rotateSeed: protectedProcedure.mutation(async ({ ctx }) => {
+      const oldSeed = await getActiveSeed(ctx.user.id);
+      let revealedSeed = null;
+      if (oldSeed) {
+        revealedSeed = await revealSeed(oldSeed.id);
+      }
+      // Create new seed
+      const serverSeed = generateServerSeed();
+      const serverSeedHash = hashServerSeed(serverSeed);
+      const clientSeed = crypto.randomBytes(16).toString("hex");
+      await createProvablyFairSeed(ctx.user.id, serverSeed, serverSeedHash, clientSeed);
+
+      return {
+        revealed: revealedSeed ? {
+          serverSeed: revealedSeed.serverSeed,
+          serverSeedHash: revealedSeed.serverSeedHash,
+          clientSeed: revealedSeed.clientSeed,
+          nonce: revealedSeed.nonce,
+        } : null,
+        newSeedHash: serverSeedHash,
+        newClientSeed: clientSeed,
+      };
+    }),
+
+    verifySeed: protectedProcedure
+      .input(z.object({
+        serverSeed: z.string(),
+        clientSeed: z.string(),
+        nonce: z.number(),
+        gameType: z.enum(["coinflip", "dice", "roulette", "plinko", "crash", "mines", "rps", "bingo", "blackjack", "keno", "limbo", "hilo"]),
+        params: z.record(z.string(), z.any()),
+      }))
+      .mutation(({ input }) => {
+        const hmac = generateGameHmac(input.serverSeed, input.clientSeed, input.nonce);
+        const seedHash = hashServerSeed(input.serverSeed);
+
+        let result;
+        switch (input.gameType) {
+          case "coinflip":
+            result = playCoinFlip(hmac, { choice: (input.params.choice as any) || "heads" });
+            break;
+          case "dice":
+            result = playDice(hmac, { target: Number(input.params.target) || 50 });
+            break;
+          case "roulette":
+            result = playRoulette(hmac, {
+              betType: (input.params.betType as any) || "red",
+              number: input.params.number != null ? Number(input.params.number) : undefined,
+            });
+            break;
+          case "plinko":
+            result = playPlinko(hmac, {
+              risk: (input.params.risk as any) || "medium",
+              rows: Number(input.params.rows) || 10,
+            });
+            break;
+          case "crash":
+            result = playCrash(hmac, { cashOutAt: Number(input.params.cashOutAt) || 2 });
+            break;
+          case "mines":
+            const positions = generateMinePositions(hmac, Number(input.params.mineCount) || 5);
+            result = { multiplier: 0, details: { minePositions: positions } };
+            break;
+          case "rps":
+            result = playRockPaperScissors(hmac, { choice: (input.params.choice as any) || "rock" });
+            break;
+          case "bingo":
+            result = playBingo(hmac, {});
+            break;
+          case "blackjack":
+            const deck = generateBlackjackDeck(hmac);
+            result = { multiplier: 0, details: { deck: deck.slice(0, 10) } };
+            break;
+          case "keno":
+            result = playKeno(hmac, { picks: (input.params.picks as number[]) || [1, 2, 3] });
+            break;
+          case "limbo":
+            result = playLimbo(hmac, { target: Number(input.params.target) || 2 });
+            break;
+          case "hilo":
+            const hiloDeck = generateHiloDeck(hmac);
+            result = { multiplier: 0, details: { deck: hiloDeck.slice(0, 10) } };
+            break;
+          default:
+            result = { multiplier: 0, details: {} };
+        }
+
+        return {
+          hmac,
+          serverSeedHash: seedHash,
+          result,
+        };
+      }),
+
     history: protectedProcedure.query(async ({ ctx }) => {
       return getUserCasinoHistory(ctx.user.id);
+    }),
+  }),
+
+  // ─── Responsible Gambling ───
+  responsibleGambling: router({
+    getSettings: protectedProcedure.query(async ({ ctx }) => {
+      return getResponsibleGamblingSettings(ctx.user.id);
+    }),
+
+    updateSettings: protectedProcedure
+      .input(z.object({
+        depositLimitDaily: z.string().nullable().optional(),
+        depositLimitWeekly: z.string().nullable().optional(),
+        depositLimitMonthly: z.string().nullable().optional(),
+        lossLimitDaily: z.string().nullable().optional(),
+        lossLimitWeekly: z.string().nullable().optional(),
+        lossLimitMonthly: z.string().nullable().optional(),
+        wagerLimitDaily: z.string().nullable().optional(),
+        wagerLimitWeekly: z.string().nullable().optional(),
+        wagerLimitMonthly: z.string().nullable().optional(),
+        sessionReminderMinutes: z.number().nullable().optional(),
+        realityCheckMinutes: z.number().nullable().optional(),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        await upsertResponsibleGamblingSettings(ctx.user.id, input as any);
+        await addResponsibleGamblingLog(ctx.user.id, "settings_updated", input);
+        return { success: true };
+      }),
+
+    setSelfExclusion: protectedProcedure
+      .input(z.object({
+        type: z.enum(["24h", "7d", "30d", "permanent"]),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        const durations: Record<string, number> = {
+          "24h": 24 * 60 * 60 * 1000,
+          "7d": 7 * 24 * 60 * 60 * 1000,
+          "30d": 30 * 24 * 60 * 60 * 1000,
+        };
+
+        const until = input.type === "permanent"
+          ? new Date("2099-12-31")
+          : new Date(Date.now() + (durations[input.type] || 0));
+
+        await upsertResponsibleGamblingSettings(ctx.user.id, {
+          selfExclusionUntil: until,
+          selfExclusionType: input.type,
+        });
+        await addResponsibleGamblingLog(ctx.user.id, "self_exclusion", { type: input.type, until });
+
+        return { success: true, until };
+      }),
+
+    getLogs: protectedProcedure.query(async ({ ctx }) => {
+      return getResponsibleGamblingLogs(ctx.user.id);
     }),
   }),
 
@@ -956,6 +2259,21 @@ export const appRouter = router({
     sweepAll: adminProcedure.mutation(async () => {
       return sweepAll();
     }),
+
+    // ─── RTP & Audit ───
+    rtpSummary: adminProcedure.query(async () => {
+      return getRtpSummary();
+    }),
+    rtpReport: adminProcedure
+      .input(z.object({ days: z.number().min(1).max(365).optional() }).optional())
+      .query(async ({ input }) => {
+        return getRtpReport(input?.days || 30);
+      }),
+    casinoGames: adminProcedure
+      .input(z.object({ limit: z.number().min(1).max(1000).optional() }).optional())
+      .query(async ({ input }) => {
+        return getAllCasinoGames(input?.limit || 100);
+      }),
 
     rejectWithdrawal: adminProcedure
       .input(z.object({ id: z.number(), note: z.string().optional() }))

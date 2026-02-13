@@ -1,5 +1,5 @@
 import { useLocation } from "wouter";
-import { Cherry, Spade, Dice1, Diamond, Zap, Crown, Gift, Flame, Clover, Coins, Dices, Bomb, Rocket, CircleDot, Triangle, Gamepad2 } from "lucide-react";
+import { Cherry, Spade, Dice1, Diamond, Zap, Crown, Gift, Flame, Clover, Coins, Dices, Bomb, Rocket, CircleDot, Triangle, Gamepad2, Swords, Grid3x3, Dice5, ArrowUpDown } from "lucide-react";
 import { toast } from "sonner";
 import BannerCarousel from "@/components/BannerCarousel";
 import { CASINO_BANNERS } from "@/data/banners";
@@ -25,6 +25,12 @@ const PLAYABLE_GAMES = [
   { name: "Crash", path: "/game/crash", icon: Rocket, color: "from-dp-pink/20 to-dp-red/10", desc: "Dogru zamanda cik!", hot: true },
   { name: "Roulette", path: "/game/roulette", icon: CircleDot, color: "from-dp-green/20 to-dp-blue/10", desc: "Klasik Avrupa ruleti", hot: false },
   { name: "Plinko", path: "/game/plinko", icon: Triangle, color: "from-dp-blue/20 to-dp-green/10", desc: "Topu birak, kazan!", hot: false },
+  { name: "Taş Kağıt Makas", path: "/game/rps", icon: Swords, color: "from-dp-yellow/20 to-dp-red/10", desc: "Kazanırsan 1.94x!", hot: true },
+  { name: "Bingo", path: "/game/bingo", icon: Grid3x3, color: "from-dp-purple/20 to-dp-pink/10", desc: "Çizgi tamamla, 500x!", hot: false },
+  { name: "Blackjack", path: "/game/blackjack", icon: Spade, color: "from-dp-green/20 to-dp-blue/10", desc: "21'e yaklaş, kazan!", hot: true },
+  { name: "Keno", path: "/game/keno", icon: Dice5, color: "from-dp-blue/20 to-dp-purple/10", desc: "Sayı seç, 10.000x!", hot: true },
+  { name: "Limbo", path: "/game/limbo", icon: Zap, color: "from-dp-yellow/20 to-dp-green/10", desc: "Hedef çarpanı geç!", hot: false },
+  { name: "Hi-Lo", path: "/game/hilo", icon: ArrowUpDown, color: "from-dp-pink/20 to-dp-purple/10", desc: "Yüksek mi düşük mü?", hot: true },
 ];
 
 const FEATURED_GAMES = [

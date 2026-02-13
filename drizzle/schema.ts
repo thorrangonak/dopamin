@@ -112,6 +112,21 @@ export const eventsCache = mysqlTable("events_cache", {
 
 export type EventsCache = typeof eventsCache.$inferSelect;
 
+// ─── Provably Fair Seeds ───
+export const provablyFairSeeds = mysqlTable("provably_fair_seeds", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  serverSeed: varchar("serverSeed", { length: 64 }).notNull(),
+  serverSeedHash: varchar("serverSeedHash", { length: 64 }).notNull(),
+  clientSeed: varchar("clientSeed", { length: 64 }).notNull(),
+  nonce: int("nonce").notNull().default(0),
+  status: mysqlEnum("status", ["active", "revealed", "expired"]).default("active").notNull(),
+  revealedAt: timestamp("revealedAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type ProvablyFairSeed = typeof provablyFairSeeds.$inferSelect;
+
 // ─── Casino Games ───
 export const casinoGames = mysqlTable("casino_games", {
   id: int("id").autoincrement().primaryKey(),
@@ -122,10 +137,85 @@ export const casinoGames = mysqlTable("casino_games", {
   payout: decimal("payout", { precision: 12, scale: 2 }).notNull().default("0.00"),
   result: mysqlEnum("result", ["win", "loss"]).notNull(),
   details: json("details"),
+  // Provably fair fields
+  serverSeedHash: varchar("serverSeedHash", { length: 64 }),
+  clientSeed: varchar("clientSeed_pf", { length: 64 }),
+  nonce: int("nonce_pf"),
+  hmacResult: varchar("hmacResult", { length: 64 }),
+  sessionId: int("sessionId"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 
 export type CasinoGame = typeof casinoGames.$inferSelect;
+
+// ─── Casino Game Sessions (Mines, etc.) ───
+export const casinoGameSessions = mysqlTable("casino_game_sessions", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  gameType: varchar("gameType", { length: 64 }).notNull(),
+  stake: decimal("stake", { precision: 12, scale: 2 }).notNull(),
+  serverSeedId: int("serverSeedId").notNull(),
+  nonce: int("nonce").notNull(),
+  gameData: json("gameData"), // e.g. mine positions for Mines
+  commitHash: varchar("commitHash", { length: 64 }),
+  status: mysqlEnum("status", ["active", "completed", "cancelled"]).default("active").notNull(),
+  result: mysqlEnum("result", ["win", "loss"]),
+  multiplier: decimal("multiplier", { precision: 10, scale: 4 }),
+  payout: decimal("payout", { precision: 12, scale: 2 }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  completedAt: timestamp("completedAt"),
+});
+
+export type CasinoGameSession = typeof casinoGameSessions.$inferSelect;
+
+// ─── Responsible Gambling Settings ───
+export const responsibleGamblingSettings = mysqlTable("responsible_gambling_settings", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull().unique(),
+  selfExclusionUntil: timestamp("selfExclusionUntil"),
+  selfExclusionType: mysqlEnum("selfExclusionType", ["24h", "7d", "30d", "permanent"]),
+  depositLimitDaily: decimal("depositLimitDaily", { precision: 12, scale: 2 }),
+  depositLimitWeekly: decimal("depositLimitWeekly", { precision: 12, scale: 2 }),
+  depositLimitMonthly: decimal("depositLimitMonthly", { precision: 12, scale: 2 }),
+  lossLimitDaily: decimal("lossLimitDaily", { precision: 12, scale: 2 }),
+  lossLimitWeekly: decimal("lossLimitWeekly", { precision: 12, scale: 2 }),
+  lossLimitMonthly: decimal("lossLimitMonthly", { precision: 12, scale: 2 }),
+  wagerLimitDaily: decimal("wagerLimitDaily", { precision: 12, scale: 2 }),
+  wagerLimitWeekly: decimal("wagerLimitWeekly", { precision: 12, scale: 2 }),
+  wagerLimitMonthly: decimal("wagerLimitMonthly", { precision: 12, scale: 2 }),
+  sessionReminderMinutes: int("sessionReminderMinutes"),
+  realityCheckMinutes: int("realityCheckMinutes"),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type ResponsibleGamblingSettings = typeof responsibleGamblingSettings.$inferSelect;
+
+// ─── Responsible Gambling Log ───
+export const responsibleGamblingLog = mysqlTable("responsible_gambling_log", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  action: varchar("action", { length: 128 }).notNull(),
+  details: json("details"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type ResponsibleGamblingLog = typeof responsibleGamblingLog.$inferSelect;
+
+// ─── RTP Tracking ───
+export const rtpTracking = mysqlTable("rtp_tracking", {
+  id: int("id").autoincrement().primaryKey(),
+  gameType: varchar("gameType", { length: 64 }).notNull(),
+  periodStart: timestamp("periodStart").notNull(),
+  periodEnd: timestamp("periodEnd").notNull(),
+  totalWagered: decimal("totalWagered", { precision: 14, scale: 2 }).notNull().default("0.00"),
+  totalPaidOut: decimal("totalPaidOut", { precision: 14, scale: 2 }).notNull().default("0.00"),
+  totalGames: int("totalGames").notNull().default(0),
+  rtp: decimal("rtp", { precision: 8, scale: 4 }).notNull().default("0.0000"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type RtpTracking = typeof rtpTracking.$inferSelect;
 
 // ─── VIP Tiers ───
 export const vipProfiles = mysqlTable("vip_profiles", {

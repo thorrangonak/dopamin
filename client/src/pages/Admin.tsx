@@ -4,14 +4,14 @@ import { Button } from "@/components/ui/button";
 import {
   LayoutDashboard, Users, Ticket, Wallet, RefreshCw, Loader2, ArrowLeft,
   Image, Plus, Pencil, Trash2, ChevronUp, ChevronDown, Eye, EyeOff, X, Save, ExternalLink,
-  ArrowDownCircle, ArrowUpCircle, CheckCircle2, XCircle, Clock,
+  ArrowDownCircle, ArrowUpCircle, CheckCircle2, XCircle, Clock, BarChart3, Shield,
 } from "lucide-react";
 import { useState, useEffect } from "react";
 import { useLocation } from "wouter";
 import { format } from "date-fns";
 import { toast } from "sonner";
 
-type Tab = "overview" | "users" | "bets" | "transactions" | "crypto" | "banners";
+type Tab = "overview" | "users" | "bets" | "transactions" | "crypto" | "banners" | "rtp" | "casinoAudit";
 
 interface BannerForm {
   title: string;
@@ -48,6 +48,9 @@ export default function Admin() {
   const allWithdrawalsQuery = trpc.admin.cryptoWithdrawals.useQuery(undefined, { enabled: user?.role === "admin" && tab === "crypto" });
   const hotWalletQuery = trpc.admin.hotWalletBalances.useQuery(undefined, { enabled: user?.role === "admin" && tab === "crypto" });
   const depositWalletsQuery = trpc.admin.depositWalletBalances.useQuery(undefined, { enabled: user?.role === "admin" && tab === "crypto" });
+  const rtpSummaryQuery = trpc.admin.rtpSummary.useQuery(undefined, { enabled: user?.role === "admin" && tab === "rtp" });
+  const rtpReportQuery = trpc.admin.rtpReport.useQuery({ days: 30 }, { enabled: user?.role === "admin" && tab === "rtp" });
+  const casinoGamesQuery = trpc.admin.casinoGames.useQuery({ limit: 100 }, { enabled: user?.role === "admin" && tab === "casinoAudit" });
 
   const approveMut = trpc.admin.approveWithdrawal.useMutation({
     onSuccess: () => {
@@ -104,6 +107,8 @@ export default function Admin() {
     { value: "transactions" as Tab, label: "İşlemler", icon: Wallet },
     { value: "crypto" as Tab, label: "Kripto", icon: ArrowDownCircle },
     { value: "banners" as Tab, label: "Bannerlar", icon: Image },
+    { value: "rtp" as Tab, label: "RTP", icon: BarChart3 },
+    { value: "casinoAudit" as Tab, label: "Casino Denetim", icon: Shield },
   ];
 
   const totalBalance = balancesQuery.data?.reduce((sum: number, b: any) => sum + parseFloat(b.amount), 0) || 0;
@@ -560,6 +565,150 @@ export default function Admin() {
       {/* Banners */}
       {tab === "banners" && (
         <BannerManager bannersQuery={bannersQuery} />
+      )}
+
+      {/* RTP */}
+      {tab === "rtp" && (
+        <div className="space-y-6">
+          {/* RTP Summary */}
+          <div>
+            <h2 className="text-lg font-bold text-foreground mb-3 flex items-center gap-2">
+              <BarChart3 className="h-5 w-5 text-primary" />
+              RTP Özeti (Tüm Zamanlar)
+            </h2>
+            {rtpSummaryQuery.isLoading ? (
+              <div className="flex justify-center py-10"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>
+            ) : !rtpSummaryQuery.data?.length ? (
+              <div className="bg-card border border-border rounded-lg p-6 text-center text-muted-foreground text-sm">Henüz veri yok</div>
+            ) : (
+              <div className="grid md:grid-cols-3 lg:grid-cols-6 gap-3">
+                {rtpSummaryQuery.data.map((row: any) => {
+                  const rtp = row.totalWagered > 0 ? ((row.totalPaidOut / row.totalWagered) * 100).toFixed(2) : "0.00";
+                  const isHealthy = parseFloat(rtp) >= 94 && parseFloat(rtp) <= 100;
+                  return (
+                    <div key={row.gameType} className="bg-card border border-border rounded-lg p-4">
+                      <p className="text-xs text-muted-foreground uppercase font-medium">{row.gameType}</p>
+                      <p className={`text-2xl font-bold mt-1 ${isHealthy ? "text-primary" : "text-destructive"}`}>
+                        {rtp}%
+                      </p>
+                      <div className="text-[10px] text-muted-foreground mt-1 space-y-0.5">
+                        <p>Wagered: {parseFloat(row.totalWagered).toFixed(2)}</p>
+                        <p>Paid Out: {parseFloat(row.totalPaidOut).toFixed(2)}</p>
+                        <p>Games: {row.totalGames}</p>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* RTP Report (30 days) */}
+          <div>
+            <h2 className="text-lg font-bold text-foreground mb-3">RTP Raporu (Son 30 Gün)</h2>
+            <div className="bg-card border border-border rounded-lg overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-border bg-secondary/50">
+                      <th className="text-left px-4 py-2.5 text-xs text-muted-foreground font-medium">Oyun</th>
+                      <th className="text-left px-4 py-2.5 text-xs text-muted-foreground font-medium">Dönem</th>
+                      <th className="text-right px-4 py-2.5 text-xs text-muted-foreground font-medium">Wagered</th>
+                      <th className="text-right px-4 py-2.5 text-xs text-muted-foreground font-medium">Paid Out</th>
+                      <th className="text-right px-4 py-2.5 text-xs text-muted-foreground font-medium">Games</th>
+                      <th className="text-right px-4 py-2.5 text-xs text-muted-foreground font-medium">RTP</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rtpReportQuery.isLoading ? (
+                      <tr><td colSpan={6} className="p-6 text-center"><Loader2 className="h-5 w-5 animate-spin text-primary mx-auto" /></td></tr>
+                    ) : !rtpReportQuery.data?.length ? (
+                      <tr><td colSpan={6} className="p-6 text-center text-muted-foreground text-sm">Veri yok</td></tr>
+                    ) : (
+                      rtpReportQuery.data.map((row: any, i: number) => {
+                        const rtp = row.totalWagered > 0 ? ((row.totalPaidOut / row.totalWagered) * 100).toFixed(2) : "0.00";
+                        return (
+                          <tr key={i} className="border-b border-border/30 hover:bg-accent/20 transition-colors">
+                            <td className="px-4 py-2.5 text-foreground font-medium">{row.gameType}</td>
+                            <td className="px-4 py-2.5 text-xs text-muted-foreground">
+                              {format(new Date(row.periodStart), "dd.MM.yy")}
+                            </td>
+                            <td className="px-4 py-2.5 text-right text-foreground">{parseFloat(row.totalWagered).toFixed(2)}</td>
+                            <td className="px-4 py-2.5 text-right text-primary">{parseFloat(row.totalPaidOut).toFixed(2)}</td>
+                            <td className="px-4 py-2.5 text-right text-muted-foreground">{row.totalGames}</td>
+                            <td className="px-4 py-2.5 text-right">
+                              <span className={`font-bold ${parseFloat(rtp) >= 94 && parseFloat(rtp) <= 100 ? "text-primary" : "text-destructive"}`}>
+                                {rtp}%
+                              </span>
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Casino Audit */}
+      {tab === "casinoAudit" && (
+        <div>
+          <h2 className="text-lg font-bold text-foreground mb-3 flex items-center gap-2">
+            <Shield className="h-5 w-5 text-green-500" />
+            Casino Oyun Denetimi (Son 100)
+          </h2>
+          <div className="bg-card border border-border rounded-lg overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-border bg-secondary/50">
+                    <th className="text-left px-3 py-2.5 text-xs text-muted-foreground font-medium">ID</th>
+                    <th className="text-left px-3 py-2.5 text-xs text-muted-foreground font-medium">User</th>
+                    <th className="text-left px-3 py-2.5 text-xs text-muted-foreground font-medium">Oyun</th>
+                    <th className="text-right px-3 py-2.5 text-xs text-muted-foreground font-medium">Bahis</th>
+                    <th className="text-right px-3 py-2.5 text-xs text-muted-foreground font-medium">Çarpan</th>
+                    <th className="text-right px-3 py-2.5 text-xs text-muted-foreground font-medium">Ödeme</th>
+                    <th className="text-left px-3 py-2.5 text-xs text-muted-foreground font-medium">Sonuç</th>
+                    <th className="text-left px-3 py-2.5 text-xs text-muted-foreground font-medium">Seed Hash</th>
+                    <th className="text-left px-3 py-2.5 text-xs text-muted-foreground font-medium">Nonce</th>
+                    <th className="text-left px-3 py-2.5 text-xs text-muted-foreground font-medium">Tarih</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {casinoGamesQuery.isLoading ? (
+                    <tr><td colSpan={10} className="p-6 text-center"><Loader2 className="h-5 w-5 animate-spin text-primary mx-auto" /></td></tr>
+                  ) : !casinoGamesQuery.data?.length ? (
+                    <tr><td colSpan={10} className="p-6 text-center text-muted-foreground text-sm">Henüz oyun kaydı yok</td></tr>
+                  ) : (
+                    casinoGamesQuery.data.map((g: any) => (
+                      <tr key={g.id} className="border-b border-border/30 hover:bg-accent/20 transition-colors">
+                        <td className="px-3 py-2.5 text-foreground">{g.id}</td>
+                        <td className="px-3 py-2.5 text-xs text-muted-foreground">#{g.userId}</td>
+                        <td className="px-3 py-2.5 text-foreground">{g.gameType}</td>
+                        <td className="px-3 py-2.5 text-right text-foreground">{parseFloat(g.stake).toFixed(2)}</td>
+                        <td className="px-3 py-2.5 text-right text-stake-blue">{g.multiplier}x</td>
+                        <td className="px-3 py-2.5 text-right text-primary">{parseFloat(g.payout).toFixed(2)}</td>
+                        <td className="px-3 py-2.5">
+                          <span className={`text-xs px-1.5 py-0.5 rounded ${
+                            g.result === "win" ? "text-primary bg-primary/10" : "text-destructive bg-destructive/10"
+                          }`}>{g.result}</span>
+                        </td>
+                        <td className="px-3 py-2.5 text-[10px] font-mono text-muted-foreground">
+                          {g.serverSeedHash ? g.serverSeedHash.slice(0, 8) + "..." : "-"}
+                        </td>
+                        <td className="px-3 py-2.5 text-xs text-muted-foreground">{g.nonce_pf ?? "-"}</td>
+                        <td className="px-3 py-2.5 text-xs text-muted-foreground">{format(new Date(g.createdAt), "dd.MM.yy HH:mm")}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

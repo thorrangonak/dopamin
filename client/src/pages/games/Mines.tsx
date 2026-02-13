@@ -6,8 +6,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
 import { motion } from "framer-motion";
-import { Bomb, Gem, DollarSign } from "lucide-react";
+import { Bomb, Gem, DollarSign, Shield } from "lucide-react";
 import { useCurrency } from "@/contexts/CurrencyContext";
+import { Link } from "wouter";
 
 type CellState = "hidden" | "safe" | "mine";
 
@@ -20,13 +21,57 @@ export default function Mines() {
   const [grid, setGrid] = useState<CellState[]>(Array(25).fill("hidden"));
   const [revealedCount, setRevealedCount] = useState(0);
   const [gameOver, setGameOver] = useState(false);
-  const [currentMultiplier, setCurrentMultiplier] = useState(1);
+  const [currentMultiplier, setCurrentMultiplier] = useState(0);
+  const [nextMult, setNextMult] = useState(0);
   const [totalWin, setTotalWin] = useState(0);
+  const [sessionId, setSessionId] = useState<number | null>(null);
   const [minePositions, setMinePositions] = useState<number[]>([]);
+  const [commitHash, setCommitHash] = useState<string | null>(null);
+  const [fairness, setFairness] = useState<any>(null);
 
   const balanceQ = trpc.balance.get.useQuery(undefined, { enabled: isAuthenticated });
-  const playMut = trpc.casino.play.useMutation({
+
+  // Check for existing active session on mount
+  const activeSessionQ = trpc.casino.getActiveSession.useQuery(undefined, {
+    enabled: isAuthenticated && !playing && !gameOver,
+    refetchOnWindowFocus: false,
+  });
+
+  // Resume active session if exists
+  useMemo(() => {
+    if (activeSessionQ.data && !playing && !gameOver) {
+      const s = activeSessionQ.data;
+      setSessionId(s.sessionId);
+      setMineCount(s.mineCount);
+      setStake(String(s.stake));
+      setRevealedCount(s.revealedCells.length);
+      setCurrentMultiplier(s.multiplier);
+      setNextMult(s.nextMultiplier);
+      setCommitHash(s.commitHash);
+      setPlaying(true);
+
+      // Restore grid
+      const newGrid: CellState[] = Array(25).fill("hidden");
+      s.revealedCells.forEach((i: number) => {
+        newGrid[i] = "safe";
+      });
+      setGrid(newGrid);
+    }
+  }, [activeSessionQ.data]);
+
+  const startMut = trpc.casino.startMines.useMutation({
     onSuccess: (data) => {
+      setSessionId(data.sessionId);
+      setCommitHash(data.commitHash);
+      setFairness(data.fairness);
+      setPlaying(true);
+      setGrid(Array(25).fill("hidden"));
+      setRevealedCount(0);
+      setCurrentMultiplier(0);
+      setNextMult(0);
+      setGameOver(false);
+      setTotalWin(0);
+      setMinePositions([]);
       balanceQ.refetch();
     },
     onError: (err) => {
@@ -34,21 +79,80 @@ export default function Mines() {
     },
   });
 
-  // Calculate multiplier for current revealed count
-  const calcMultiplier = (revealed: number, mines: number) => {
-    const total = 25;
-    const safe = total - mines;
-    let mult = 1;
-    for (let i = 0; i < revealed; i++) {
-      mult *= (total - i) / (safe - i);
-    }
-    return parseFloat((mult * 0.97).toFixed(4));
-  };
+  const revealMut = trpc.casino.revealMine.useMutation({
+    onSuccess: (data) => {
+      const newGrid = [...grid];
 
-  const nextMultiplier = useMemo(
-    () => calcMultiplier(revealedCount + 1, mineCount),
-    [revealedCount, mineCount]
-  );
+      if (data.isMine) {
+        // Hit mine — reveal all mines
+        data.minePositions!.forEach((pos: number) => {
+          newGrid[pos] = "mine";
+        });
+        // Keep safe cells revealed
+        data.revealedCells.forEach((pos: number) => {
+          if (!data.minePositions!.includes(pos)) {
+            newGrid[pos] = "safe";
+          }
+        });
+        setGrid(newGrid);
+        setGameOver(true);
+        setPlaying(false);
+        setMinePositions(data.minePositions!);
+        toast.error("Mayına bastın! 💥");
+      } else {
+        // Safe cell
+        data.revealedCells.forEach((pos: number) => {
+          newGrid[pos] = "safe";
+        });
+        setGrid(newGrid);
+        setRevealedCount(data.revealedCells.length);
+        setCurrentMultiplier(data.multiplier);
+        setNextMult(data.nextMultiplier || 0);
+
+        if (data.gameOver) {
+          // All safe cells revealed — auto cash out
+          setGameOver(true);
+          setPlaying(false);
+          setTotalWin(data.payout!);
+          if (data.minePositions) setMinePositions(data.minePositions);
+          // Reveal mines on grid
+          if (data.minePositions) {
+            data.minePositions.forEach((pos: number) => {
+              newGrid[pos] = "mine";
+            });
+            setGrid([...newGrid]);
+          }
+          balanceQ.refetch();
+          toast.success(`Tüm hücreler açıldı! ${formatAmount(data.payout!, { showSign: true })} (${data.multiplier}x)`);
+        }
+      }
+    },
+    onError: (err) => {
+      toast.error(err.message);
+    },
+  });
+
+  const cashOutMut = trpc.casino.cashOutMines.useMutation({
+    onSuccess: (data) => {
+      setGameOver(true);
+      setPlaying(false);
+      setTotalWin(data.payout);
+      setCurrentMultiplier(data.multiplier);
+      setMinePositions(data.minePositions);
+
+      // Reveal mines on grid
+      const newGrid = [...grid];
+      data.minePositions.forEach((pos: number) => {
+        if (newGrid[pos] === "hidden") newGrid[pos] = "mine";
+      });
+      setGrid(newGrid);
+      balanceQ.refetch();
+      toast.success(`Cash Out! ${formatAmount(data.payout, { showSign: true })} (${data.multiplier.toFixed(2)}x)`);
+    },
+    onError: (err) => {
+      toast.error(err.message);
+    },
+  });
 
   const handleStart = () => {
     if (!isAuthenticated) {
@@ -60,87 +164,31 @@ export default function Mines() {
       toast.error(`Minimum bahis ${formatAmount(1)}`);
       return;
     }
-
-    // Generate mine positions locally
-    const mines = new Set<number>();
-    while (mines.size < mineCount) {
-      mines.add(Math.floor(Math.random() * 25));
-    }
-    setMinePositions(Array.from(mines));
-
-    setGrid(Array(25).fill("hidden"));
-    setRevealedCount(0);
-    setGameOver(false);
-    setCurrentMultiplier(1);
-    setTotalWin(0);
-    setPlaying(true);
+    startMut.mutate({ stake: s, mineCount });
   };
 
   const handleCellClick = (index: number) => {
-    if (!playing || gameOver || grid[index] !== "hidden") return;
-
-    const newGrid = [...grid];
-    const isMine = minePositions.includes(index);
-
-    if (isMine) {
-      // Hit a mine - reveal all
-      newGrid[index] = "mine";
-      minePositions.forEach((pos) => {
-        newGrid[pos] = "mine";
-      });
-      setGrid(newGrid);
-      setGameOver(true);
-      setPlaying(false);
-
-      // Send loss to server
-      const s = parseFloat(stake);
-      playMut.mutate({
-        gameType: "mines",
-        stake: s,
-        params: { mines: mineCount, revealed: revealedCount, cashOut: false },
-      });
-      toast.error("Mayına bastın! 💥");
-    } else {
-      // Safe cell
-      newGrid[index] = "safe";
-      const newRevealed = revealedCount + 1;
-      const newMult = calcMultiplier(newRevealed, mineCount);
-      setGrid(newGrid);
-      setRevealedCount(newRevealed);
-      setCurrentMultiplier(newMult);
-
-      // Check if all safe cells revealed
-      if (newRevealed >= 25 - mineCount) {
-        handleCashOut(newRevealed);
-      }
-    }
+    if (!playing || gameOver || grid[index] !== "hidden" || !sessionId) return;
+    if (revealMut.isPending) return;
+    revealMut.mutate({ sessionId, cellIndex: index });
   };
 
-  const handleCashOut = (overrideRevealed?: number) => {
-    const revealed = overrideRevealed ?? revealedCount;
-    if (revealed === 0) return;
+  const handleCashOut = () => {
+    if (!sessionId || revealedCount === 0) return;
+    cashOutMut.mutate({ sessionId });
+  };
 
-    const s = parseFloat(stake);
-    const mult = calcMultiplier(revealed, mineCount);
-    const payout = s * mult;
-
-    // Reveal all mines
-    const newGrid = [...grid];
-    minePositions.forEach((pos) => {
-      if (newGrid[pos] === "hidden") newGrid[pos] = "mine";
-    });
-    setGrid(newGrid);
-    setGameOver(true);
+  const handleNewGame = () => {
     setPlaying(false);
-    setTotalWin(payout);
-
-    // Send win to server
-    playMut.mutate({
-      gameType: "mines",
-      stake: s,
-      params: { mines: mineCount, revealed, cashOut: true },
-    });
-    toast.success(`Cash Out! ${formatAmount(payout, { showSign: true })} (${mult.toFixed(2)}x)`);
+    setGameOver(false);
+    setGrid(Array(25).fill("hidden"));
+    setRevealedCount(0);
+    setCurrentMultiplier(0);
+    setNextMult(0);
+    setTotalWin(0);
+    setSessionId(null);
+    setMinePositions([]);
+    setCommitHash(null);
   };
 
   const quickStakes = [5, 10, 25, 50, 100];
@@ -154,34 +202,43 @@ export default function Mines() {
           <Bomb className="w-5 h-5 text-red-400" />
         </div>
         <div>
-          <h1 className="text-xl font-bold text-white">Mines</h1>
-          <p className="text-sm text-zinc-400">Mayınlardan kaçın, çarpanı artır!</p>
+          <h1 className="text-xl font-bold text-foreground">Mines</h1>
+          <p className="text-sm text-muted-foreground">Mayınlardan kaçın, çarpanı artır!</p>
         </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_240px] gap-4">
         {/* Game Grid */}
-        <div className="bg-zinc-800/50 border border-zinc-700/50 rounded-xl p-4">
+        <div className="bg-card border border-border rounded-xl p-4">
           {/* Multiplier Bar */}
           {playing && revealedCount > 0 && (
-            <div className="flex items-center justify-between mb-4 p-3 bg-zinc-900/50 rounded-lg">
+            <div className="flex items-center justify-between mb-4 p-3 bg-secondary/50 rounded-lg">
               <div>
-                <p className="text-xs text-zinc-500">Mevcut Çarpan</p>
+                <p className="text-xs text-muted-foreground">Mevcut Çarpan</p>
                 <p className="text-lg font-bold text-green-400">{currentMultiplier.toFixed(2)}x</p>
               </div>
               <div>
-                <p className="text-xs text-zinc-500">Potansiyel Kazanç</p>
+                <p className="text-xs text-muted-foreground">Potansiyel Kazanç</p>
                 <p className="text-lg font-bold text-yellow-400">
                   {formatAmount(parseFloat(stake) * currentMultiplier)}
                 </p>
               </div>
               <Button
-                onClick={() => handleCashOut()}
+                onClick={handleCashOut}
+                disabled={cashOutMut.isPending}
                 className="bg-yellow-500 hover:bg-yellow-600 text-black font-bold"
               >
                 <DollarSign className="w-4 h-4 mr-1" />
                 Cash Out
               </Button>
+            </div>
+          )}
+
+          {/* Commit Hash */}
+          {commitHash && playing && (
+            <div className="flex items-center gap-2 mb-3 text-[10px] text-muted-foreground">
+              <Shield className="w-3 h-3 text-green-500" />
+              <span>Commit: {commitHash.slice(0, 12)}...</span>
             </div>
           )}
 
@@ -191,16 +248,14 @@ export default function Mines() {
               <motion.button
                 key={i}
                 onClick={() => handleCellClick(i)}
-                disabled={!playing || gameOver || cell !== "hidden"}
+                disabled={!playing || gameOver || cell !== "hidden" || revealMut.isPending}
                 whileHover={cell === "hidden" && playing ? { scale: 1.05 } : {}}
                 whileTap={cell === "hidden" && playing ? { scale: 0.95 } : {}}
-                initial={cell !== "hidden" ? { rotateY: 180 } : { rotateY: 0 }}
-                animate={{ rotateY: cell !== "hidden" ? 0 : 0 }}
                 className={`aspect-square rounded-lg flex items-center justify-center text-lg font-bold transition-all ${
                   cell === "hidden"
                     ? playing
-                      ? "bg-zinc-700 hover:bg-zinc-600 cursor-pointer border border-zinc-600"
-                      : "bg-zinc-700/50 border border-zinc-700 cursor-default"
+                      ? "bg-secondary hover:bg-accent cursor-pointer border border-border"
+                      : "bg-secondary/50 border border-border cursor-default"
                     : cell === "safe"
                     ? "bg-green-500/20 border-2 border-green-500"
                     : "bg-red-500/20 border-2 border-red-500"
@@ -224,13 +279,22 @@ export default function Mines() {
               </p>
             </motion.div>
           )}
+
+          {/* Provably Fair Badge */}
+          {gameOver && fairness && (
+            <div className="flex items-center justify-center gap-2 mt-4 text-xs text-muted-foreground">
+              <Shield className="w-3.5 h-3.5 text-green-500" />
+              <span>Seed: {fairness.serverSeedHash.slice(0, 8)}... | Nonce: {fairness.nonce}</span>
+              <Link href="/provably-fair" className="text-green-500 hover:underline">Doğrula</Link>
+            </div>
+          )}
         </div>
 
         {/* Controls */}
-        <div className="bg-zinc-800/50 border border-zinc-700/50 rounded-xl p-4 space-y-4">
+        <div className="bg-card border border-border rounded-xl p-4 space-y-4">
           {/* Mine Count */}
           <div>
-            <label className="text-xs text-zinc-400 mb-1 block">Mayın Sayısı</label>
+            <label className="text-xs text-muted-foreground mb-1 block">Mayın Sayısı</label>
             <div className="flex flex-wrap gap-1.5">
               {mineOptions.map((m) => (
                 <button
@@ -240,7 +304,7 @@ export default function Mines() {
                   className={`px-2.5 py-1.5 text-xs rounded transition-colors ${
                     mineCount === m
                       ? "bg-red-500 text-white"
-                      : "bg-zinc-700 text-zinc-300 hover:bg-zinc-600"
+                      : "bg-secondary text-foreground/80 hover:bg-accent"
                   }`}
                 >
                   {m}
@@ -251,17 +315,17 @@ export default function Mines() {
 
           {/* Stake */}
           <div>
-            <label className="text-xs text-zinc-400 mb-1 block">Bahis Tutarı</label>
+            <label className="text-xs text-muted-foreground mb-1 block">Bahis Tutarı</label>
             <div className="flex items-center gap-2">
               <Input
                 type="number"
                 value={stake}
                 onChange={(e) => setStake(e.target.value)}
-                className="bg-zinc-900 border-zinc-700 text-white text-sm"
+                className="bg-secondary border-border text-foreground text-sm"
                 min={1}
                 disabled={playing}
               />
-              <span className="text-zinc-400 text-xs">{currencySymbol}</span>
+              <span className="text-muted-foreground text-xs">{currencySymbol}</span>
             </div>
             <div className="flex flex-wrap gap-1 mt-2">
               {quickStakes.map((qs) => (
@@ -269,7 +333,7 @@ export default function Mines() {
                   key={qs}
                   onClick={() => setStake(String(qs))}
                   disabled={playing}
-                  className="px-2.5 py-1.5 text-[11px] rounded bg-zinc-700 text-zinc-300 hover:bg-zinc-600 transition-colors"
+                  className="px-2.5 py-1.5 text-[11px] rounded bg-secondary text-foreground/80 hover:bg-accent transition-colors"
                 >
                   {qs}
                 </button>
@@ -279,53 +343,54 @@ export default function Mines() {
 
           {/* Stats */}
           <div className="space-y-2 text-xs">
-            <div className="flex justify-between text-zinc-400">
+            <div className="flex justify-between text-muted-foreground">
               <span>Mayınlar</span>
               <span className="text-red-400">{mineCount}</span>
             </div>
-            <div className="flex justify-between text-zinc-400">
+            <div className="flex justify-between text-muted-foreground">
               <span>Güvenli Hücre</span>
               <span className="text-green-400">{25 - mineCount}</span>
             </div>
-            <div className="flex justify-between text-zinc-400">
+            <div className="flex justify-between text-muted-foreground">
               <span>Açılan</span>
-              <span className="text-white">{revealedCount}</span>
+              <span className="text-foreground">{revealedCount}</span>
             </div>
-            {playing && (
-              <div className="flex justify-between text-zinc-400">
+            {playing && nextMult > 0 && (
+              <div className="flex justify-between text-muted-foreground">
                 <span>Sonraki Çarpan</span>
-                <span className="text-yellow-400">{nextMultiplier.toFixed(2)}x</span>
+                <span className="text-yellow-400">{nextMult.toFixed(2)}x</span>
               </div>
             )}
           </div>
 
-          {!playing ? (
+          {!playing && !gameOver ? (
             <Button
               onClick={handleStart}
-              className="w-full bg-green-500 hover:bg-green-600 text-black font-bold"
+              disabled={startMut.isPending}
+              className="w-full bg-primary hover:bg-primary/90 text-primary-foreground font-bold"
             >
-              Oyunu Başlat
+              {startMut.isPending ? "Başlatılıyor..." : "Oyunu Başlat"}
+            </Button>
+          ) : gameOver ? (
+            <Button
+              onClick={handleNewGame}
+              className="w-full bg-primary hover:bg-primary/90 text-primary-foreground font-bold"
+            >
+              Yeni Oyun
             </Button>
           ) : (
             <Button
-              onClick={() => {
-                setPlaying(false);
-                setGameOver(true);
-                const newGrid = [...grid];
-                minePositions.forEach((pos) => {
-                  if (newGrid[pos] === "hidden") newGrid[pos] = "mine";
-                });
-                setGrid(newGrid);
-              }}
-              variant="outline"
-              className="w-full border-zinc-600 text-zinc-300"
+              onClick={handleCashOut}
+              disabled={revealedCount === 0 || cashOutMut.isPending}
+              className="w-full bg-yellow-500 hover:bg-yellow-600 text-black font-bold"
             >
-              Oyunu Bırak
+              <DollarSign className="w-4 h-4 mr-1" />
+              {cashOutMut.isPending ? "Ödeniyor..." : "Cash Out"}
             </Button>
           )}
 
           {isAuthenticated && balanceQ.data && (
-            <p className="text-center text-[10px] text-zinc-500">
+            <p className="text-center text-[10px] text-muted-foreground">
               Bakiye: {formatAmount(balanceQ.data.amount)}
             </p>
           )}
@@ -333,14 +398,16 @@ export default function Mines() {
       </div>
 
       {/* Info */}
-      <div className="bg-zinc-800/30 border border-zinc-700/30 rounded-lg p-4">
-        <h3 className="text-sm font-semibold text-zinc-300 mb-2">Nasıl Oynanır?</h3>
-        <ul className="text-xs text-zinc-500 space-y-1">
+      <div className="bg-card/50 border border-border/50 rounded-lg p-4">
+        <h3 className="text-sm font-semibold text-foreground/80 mb-2">Nasıl Oynanır?</h3>
+        <ul className="text-xs text-muted-foreground space-y-1">
           <li>• Mayın sayısını ve bahis tutarını belirleyin</li>
           <li>• Hücrelere tıklayarak açın - her güvenli hücre çarpanı artırır</li>
           <li>• İstediğiniz zaman Cash Out yaparak kazancınızı alın</li>
           <li>• Mayına basarsanız tüm bahsinizi kaybedersiniz</li>
           <li>• Daha fazla mayın = daha yüksek çarpanlar</li>
+          <li>• Ev avantajı: %3</li>
+          <li>• <Shield className="w-3 h-3 inline text-green-500" /> Provably Fair — tüm sonuçlar doğrulanabilir</li>
         </ul>
       </div>
     </div>

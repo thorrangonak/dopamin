@@ -13,8 +13,8 @@ import {
   Gamepad2, Volleyball, Home, HelpCircle,
   Dice1, Spade, Diamond, Cherry, Clover, Star,
   Layers, Flame, Zap, Crown, Gift, Activity,
-  Coins, Dices, Bomb, Rocket, Triangle,
-  Sun, Moon,
+  Coins, Dices, Bomb, Rocket, Triangle, Grid3x3, Dice5, ArrowUpDown,
+  Sun, Moon, ChevronDown, Sparkles,
 } from "lucide-react";
 import { useTheme } from "@/contexts/ThemeContext";
 import { useCurrency } from "@/contexts/CurrencyContext";
@@ -58,20 +58,31 @@ const SPORT_GROUP_ICONS: Record<string, any> = {
   Esports: Gamepad2,
 };
 
-const CASINO_ITEMS = [
-  { label: "Ana Sayfa", path: "/casino", icon: Home },
-  { label: "Popüler", path: "/casino/popular", icon: Flame },
-  { label: "Favoriler", path: "/casino/favorites", icon: Star },
-  { type: "divider" as const },
+const DOPAMIN_HUB_GAMES = [
   { label: "Coin Flip", path: "/game/coinflip", icon: Coins },
   { label: "Dice", path: "/game/dice", icon: Dices },
   { label: "Mines", path: "/game/mines", icon: Bomb },
   { label: "Crash", path: "/game/crash", icon: Rocket },
   { label: "Roulette", path: "/game/roulette", icon: CircleDot },
   { label: "Plinko", path: "/game/plinko", icon: Triangle },
-  { type: "divider" as const },
+  { label: "Taş Kağıt Makas", path: "/game/rps", icon: Swords },
+  { label: "Bingo", path: "/game/bingo", icon: Grid3x3 },
+  { label: "Blackjack", path: "/game/blackjack", icon: Spade },
+  { label: "Keno", path: "/game/keno", icon: Dice5 },
+  { label: "Limbo", path: "/game/limbo", icon: Zap },
+  { label: "Hi-Lo", path: "/game/hilo", icon: ArrowUpDown },
+] as const;
+
+const CASINO_ITEMS_TOP = [
+  { label: "Ana Sayfa", path: "/casino", icon: Home },
+  { label: "Popüler", path: "/casino/popular", icon: Flame },
+  { label: "Favoriler", path: "/casino/favorites", icon: Star },
+] as const;
+
+// Dopamin Hub goes between TOP and BOTTOM
+
+const CASINO_ITEMS_BOTTOM = [
   { label: "Slots", path: "/casino/slots", icon: Cherry },
-  { label: "Blackjack", path: "/casino/blackjack", icon: Spade },
   { label: "Poker", path: "/casino/poker", icon: Diamond },
   { label: "Baccarat", path: "/casino/baccarat", icon: Clover },
   { label: "Canlı Casino", path: "/casino/live", icon: Zap },
@@ -301,9 +312,30 @@ function DesktopSidebar({ collapsed, onToggle }: { collapsed: boolean; onToggle:
     return groups;
   }, [sportsQuery.data]);
 
+  const [hubOpen, setHubOpen] = useState(() => location.startsWith("/game/"));
+
   if (section === "casino") {
-    // Casino sidebar - static items
-    const items = CASINO_ITEMS;
+    // Casino sidebar: TOP → Dopamin Hub → BOTTOM
+    const hubActive = DOPAMIN_HUB_GAMES.some(g => location === g.path);
+
+    const renderNavItem = (item: any, i: number) => {
+      if ("type" in item && item.type === "divider") {
+        return <div key={`div-${i}`} className="my-2 border-t border-sidebar-border" />;
+      }
+      const navItem = item as { label: string; path: string; icon: any };
+      const Icon = navItem.icon;
+      const isActive = location === navItem.path || (navItem.path !== "/" && location.startsWith(navItem.path));
+      return (
+        <button key={navItem.path} onClick={() => setLocation(navItem.path)}
+          className={`w-full flex items-center gap-3 px-2.5 py-2 rounded-md text-sm transition-all duration-200 ${isActive ? "bg-primary/15 text-primary font-medium" : "text-muted-foreground hover:text-foreground hover:bg-sidebar-accent/50"}`}
+          title={collapsed ? navItem.label : undefined}
+        >
+          <Icon className={`h-4 w-4 shrink-0 ${isActive ? "text-primary" : ""}`} />
+          {!collapsed && <span className="truncate">{navItem.label}</span>}
+        </button>
+      );
+    };
+
     return (
       <aside className={`hidden lg:flex flex-col border-r border-border bg-sidebar shrink-0 transition-all duration-200 ${collapsed ? "w-14" : "w-52"}`}>
         <div className="flex items-center justify-end p-2">
@@ -312,23 +344,51 @@ function DesktopSidebar({ collapsed, onToggle }: { collapsed: boolean; onToggle:
           </button>
         </div>
         <nav className="flex-1 overflow-y-auto px-2 pb-4 space-y-0.5">
-          {items.map((item, i) => {
-            if ("type" in item && item.type === "divider") {
-              return <div key={`div-${i}`} className="my-2 border-t border-sidebar-border" />;
-            }
-            const navItem = item as { label: string; path: string; icon: any };
-            const Icon = navItem.icon;
-            const isActive = location === navItem.path || (navItem.path !== "/" && location.startsWith(navItem.path));
-            return (
-              <button key={navItem.path} onClick={() => setLocation(navItem.path)}
-                className={`w-full flex items-center gap-3 px-2.5 py-2 rounded-md text-sm transition-all duration-200 ${isActive ? "bg-primary/15 text-primary font-medium" : "text-muted-foreground hover:text-foreground hover:bg-sidebar-accent/50"}`}
-                title={collapsed ? navItem.label : undefined}
-              >
-                <Icon className={`h-4 w-4 shrink-0 ${isActive ? "text-primary" : ""}`} />
-                {!collapsed && <span className="truncate">{navItem.label}</span>}
-              </button>
-            );
-          })}
+          {/* Top items: Ana Sayfa, Popüler, Favoriler */}
+          {CASINO_ITEMS_TOP.map((item, i) => renderNavItem(item, i))}
+
+          {/* Dopamin Hub — collapsible (above Slots) */}
+          <div className="my-1">
+            <button
+              onClick={() => { if (collapsed) { setHubOpen(true); } else { setHubOpen(!hubOpen); } }}
+              className={`w-full flex items-center gap-3 px-2.5 py-2 rounded-md text-sm font-semibold transition-all duration-200 ${
+                hubActive
+                  ? "bg-gradient-to-r from-primary/20 to-primary/5 text-primary"
+                  : "text-foreground hover:bg-sidebar-accent/50"
+              }`}
+              title={collapsed ? "Dopamin Hub" : undefined}
+            >
+              <Sparkles className={`h-4 w-4 shrink-0 ${hubActive ? "text-primary" : "text-yellow-500"}`} />
+              {!collapsed && (
+                <>
+                  <span className="truncate flex-1 text-left">Dopamin Hub</span>
+                  <ChevronDown className={`h-3.5 w-3.5 text-muted-foreground transition-transform duration-200 ${hubOpen ? "rotate-180" : ""}`} />
+                </>
+              )}
+            </button>
+            {(hubOpen || collapsed) && (
+              <div className={`${collapsed ? "" : "ml-2 mt-0.5 border-l border-sidebar-border pl-2"} space-y-0.5`}>
+                {DOPAMIN_HUB_GAMES.map((game) => {
+                  const Icon = game.icon;
+                  const isActive = location === game.path;
+                  return (
+                    <button key={game.path} onClick={() => setLocation(game.path)}
+                      className={`w-full flex items-center gap-3 px-2.5 py-1.5 rounded-md text-[13px] transition-all duration-200 ${
+                        isActive ? "bg-primary/15 text-primary font-medium" : "text-muted-foreground hover:text-foreground hover:bg-sidebar-accent/50"
+                      }`}
+                      title={collapsed ? game.label : undefined}
+                    >
+                      <Icon className={`h-3.5 w-3.5 shrink-0 ${isActive ? "text-primary" : ""}`} />
+                      {!collapsed && <span className="truncate">{game.label}</span>}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* Bottom items: Slots, Poker, Baccarat, etc. */}
+          {CASINO_ITEMS_BOTTOM.map((item, i) => renderNavItem(item, i + 100))}
         </nav>
       </aside>
     );
@@ -422,7 +482,8 @@ function MobileSidebar({ open, onClose }: { open: boolean; onClose: () => void }
   const { theme, toggleTheme } = useTheme();
   const { selectedLeague, setSelectedLeague } = useSection();
   const sportsQuery = trpc.sports.list.useQuery(undefined, { enabled: section === "sports" });
-  const items = CASINO_ITEMS;
+  const casinoItemsTop = CASINO_ITEMS_TOP;
+  const casinoItemsBottom = CASINO_ITEMS_BOTTOM;
 
   // Lock body scroll when sidebar is open
   useEffect(() => {
@@ -522,27 +583,7 @@ function MobileSidebar({ open, onClose }: { open: boolean; onClose: () => void }
                   })()}
                 </>
               ) : (
-                <>
-                  <p className="text-[10px] uppercase tracking-wider text-muted-foreground px-2 mb-2 font-semibold">Casino Oyunları</p>
-                  {items.map((item, i) => {
-                    if ("type" in item && item.type === "divider") {
-                      return <div key={`div-${i}`} className="my-2 border-t border-sidebar-border" />;
-                    }
-                    const navItem = item as { label: string; path: string; icon: any };
-                    const Icon = navItem.icon;
-                    const isActive = location === navItem.path || (navItem.path !== "/" && location.startsWith(navItem.path));
-                    return (
-                      <button key={navItem.path} onClick={() => setLocation(navItem.path)}
-                        className={`w-full flex items-center gap-3 px-2.5 py-2.5 rounded-md text-sm transition-all duration-200 ${
-                          isActive ? "bg-primary/15 text-primary font-medium" : "text-muted-foreground hover:text-foreground hover:bg-sidebar-accent/50"
-                        }`}
-                      >
-                        <Icon className={`h-4 w-4 shrink-0 ${isActive ? "text-primary" : ""}`} />
-                        <span className="truncate">{navItem.label}</span>
-                      </button>
-                    );
-                  })}
-                </>
+                <MobileCasinoNav topItems={casinoItemsTop} bottomItems={casinoItemsBottom} location={location} setLocation={setLocation} />
               )}
             </nav>
 
@@ -595,6 +636,81 @@ function MobileSidebar({ open, onClose }: { open: boolean; onClose: () => void }
         </>
       )}
     </AnimatePresence>
+  );
+}
+
+function MobileCasinoNav({ topItems, bottomItems, location, setLocation }: {
+  topItems: typeof CASINO_ITEMS_TOP;
+  bottomItems: typeof CASINO_ITEMS_BOTTOM;
+  location: string;
+  setLocation: (p: string) => void;
+}) {
+  const [mobileHubOpen, setMobileHubOpen] = useState(() => location.startsWith("/game/"));
+  const hubActive = DOPAMIN_HUB_GAMES.some(g => location === g.path);
+
+  const renderItem = (item: any, i: number) => {
+    if ("type" in item && item.type === "divider") {
+      return <div key={`div-${i}`} className="my-2 border-t border-sidebar-border" />;
+    }
+    const navItem = item as { label: string; path: string; icon: any };
+    const Icon = navItem.icon;
+    const isActive = location === navItem.path || (navItem.path !== "/" && location.startsWith(navItem.path));
+    return (
+      <button key={navItem.path} onClick={() => setLocation(navItem.path)}
+        className={`w-full flex items-center gap-3 px-2.5 py-2.5 rounded-md text-sm transition-all duration-200 ${
+          isActive ? "bg-primary/15 text-primary font-medium" : "text-muted-foreground hover:text-foreground hover:bg-sidebar-accent/50"
+        }`}
+      >
+        <Icon className={`h-4 w-4 shrink-0 ${isActive ? "text-primary" : ""}`} />
+        <span className="truncate">{navItem.label}</span>
+      </button>
+    );
+  };
+
+  return (
+    <>
+      <p className="text-[10px] uppercase tracking-wider text-muted-foreground px-2 mb-2 font-semibold">Casino</p>
+
+      {/* Top items: Ana Sayfa, Popüler, Favoriler */}
+      {topItems.map((item, i) => renderItem(item, i))}
+
+      {/* Dopamin Hub — collapsible (above Slots) */}
+      <div className="mt-1">
+        <button
+          onClick={() => setMobileHubOpen(!mobileHubOpen)}
+          className={`w-full flex items-center gap-3 px-2.5 py-2.5 rounded-md text-sm font-semibold transition-all duration-200 ${
+            hubActive
+              ? "bg-gradient-to-r from-primary/20 to-primary/5 text-primary"
+              : "text-foreground hover:bg-sidebar-accent/50"
+          }`}
+        >
+          <Sparkles className={`h-4 w-4 shrink-0 ${hubActive ? "text-primary" : "text-yellow-500"}`} />
+          <span className="truncate flex-1 text-left">Dopamin Hub</span>
+          <ChevronDown className={`h-3.5 w-3.5 text-muted-foreground transition-transform duration-200 ${mobileHubOpen ? "rotate-180" : ""}`} />
+        </button>
+        {mobileHubOpen && (
+          <div className="ml-3 mt-0.5 border-l border-sidebar-border pl-2 space-y-0.5">
+            {DOPAMIN_HUB_GAMES.map((game) => {
+              const Icon = game.icon;
+              const isActive = location === game.path;
+              return (
+                <button key={game.path} onClick={() => setLocation(game.path)}
+                  className={`w-full flex items-center gap-3 px-2.5 py-2 rounded-md text-[13px] transition-all duration-200 ${
+                    isActive ? "bg-primary/15 text-primary font-medium" : "text-muted-foreground hover:text-foreground hover:bg-sidebar-accent/50"
+                  }`}
+                >
+                  <Icon className={`h-3.5 w-3.5 shrink-0 ${isActive ? "text-primary" : ""}`} />
+                  <span className="truncate">{game.label}</span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* Bottom items: Slots, Poker, Baccarat, etc. */}
+      {bottomItems.map((item, i) => renderItem(item, i + 100))}
+    </>
   );
 }
 
