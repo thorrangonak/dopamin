@@ -1,4 +1,4 @@
-import "dotenv/config";
+// Note: dotenv not needed on Vercel - env vars are injected automatically
 import express from "express";
 import { registerOAuthRoutes } from "../_core/oauth";
 
