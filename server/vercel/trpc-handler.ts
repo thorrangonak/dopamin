@@ -1,4 +1,4 @@
-// Note: dotenv not needed on Vercel - env vars are injected automatically
+import "dotenv/config";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import express from "express";
 import { appRouter } from "../routers";

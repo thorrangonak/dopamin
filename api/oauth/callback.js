@@ -1,4 +1,5 @@
 // server/vercel/oauth-handler.ts
+import "dotenv/config";
 import express from "express";
 
 // shared/const.ts
