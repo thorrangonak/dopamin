@@ -20,6 +20,7 @@ import { useTheme } from "@/contexts/ThemeContext";
 import { useCurrency } from "@/contexts/CurrencyContext";
 import CurrencySelector from "@/components/CurrencySelector";
 import DopaminLogo from "@/components/DopaminLogo";
+import DopaminMoleculeIcon from "@/components/DopaminMoleculeIcon";
 import ChatWidget from "@/components/ChatWidget";
 
 /* ─── Section Context ─── */
@@ -121,32 +122,33 @@ function TopBar({ onMenuToggle }: { onMenuToggle: () => void }) {
         <Menu className="h-5 w-5" />
       </button>
 
-      {/* Logo */}
-      <div className="flex items-center cursor-pointer mr-1 sm:mr-2" onClick={() => setLocation("/")}>
-        <DopaminLogo />
+      {/* Logo - icon only on mobile, full on sm+ */}
+      <div className="flex items-center cursor-pointer shrink-0" onClick={() => setLocation("/")}>
+        <span className="sm:hidden"><DopaminMoleculeIcon size={22} /></span>
+        <span className="hidden sm:inline-flex"><DopaminLogo /></span>
       </div>
 
       {/* Casino / Spor Toggle */}
-      <div className="flex items-center bg-secondary rounded-lg p-0.5">
+      <div className="flex items-center bg-secondary rounded-lg p-0.5 shrink-0">
         <button
           onClick={() => { setSection("casino"); setLocation("/casino"); }}
-          className={`px-3 sm:px-4 py-1.5 rounded-md text-xs sm:text-sm font-semibold transition-all duration-200 ${
+          className={`px-2.5 sm:px-4 py-1 sm:py-1.5 rounded-md text-[11px] sm:text-sm font-semibold transition-all duration-200 ${
             section === "casino"
               ? "dp-gradient-bg text-white shadow-sm dp-glow-sm"
               : "text-muted-foreground hover:text-foreground"
           }`}
         >
-          <Dice1 className="h-4 w-4 inline-block mr-1" /> Casino
+          <Dice1 className="h-4 w-4 hidden sm:inline-block mr-1" /> Casino
         </button>
         <button
           onClick={() => { setSection("sports"); setLocation("/"); }}
-          className={`px-3 sm:px-4 py-1.5 rounded-md text-xs sm:text-sm font-semibold transition-all duration-200 ${
+          className={`px-2.5 sm:px-4 py-1 sm:py-1.5 rounded-md text-[11px] sm:text-sm font-semibold transition-all duration-200 ${
             section === "sports"
               ? "dp-gradient-bg text-white shadow-sm dp-glow-sm"
               : "text-muted-foreground hover:text-foreground"
           }`}
         >
-          <Trophy className="h-4 w-4 inline-block mr-1" /> Spor
+          <Trophy className="h-4 w-4 hidden sm:inline-block mr-1" /> Spor
         </button>
       </div>
 
@@ -172,13 +174,13 @@ function TopBar({ onMenuToggle }: { onMenuToggle: () => void }) {
       <div className="flex-1 md:hidden" />
 
       {/* Right side */}
-      <div className="flex items-center gap-1.5 sm:gap-2">
+      <div className="flex items-center gap-1 sm:gap-2">
         {/* Currency selector */}
         <CurrencySelector />
-        {/* Theme toggle */}
+        {/* Theme toggle - hidden on mobile */}
         <button
           onClick={toggleTheme}
-          className="p-1.5 rounded-md hover:bg-accent text-muted-foreground hover:text-foreground transition-colors"
+          className="hidden sm:flex p-1.5 rounded-md hover:bg-accent text-muted-foreground hover:text-foreground transition-colors"
           title={theme === "dark" ? "Açık Tema" : "Koyu Tema"}
         >
           {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
@@ -188,7 +190,7 @@ function TopBar({ onMenuToggle }: { onMenuToggle: () => void }) {
             {balanceQuery.data && (
               <button
                 onClick={() => setLocation("/wallet")}
-                className="flex items-center gap-1.5 px-2 sm:px-3 py-1.5 rounded-md bg-secondary hover:bg-accent transition-colors"
+                className="flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-1.5 rounded-md bg-secondary hover:bg-accent transition-colors"
               >
                 <Wallet className="h-3.5 w-3.5 text-primary" />
                 <span className="text-xs sm:text-sm font-semibold text-foreground">
@@ -212,9 +214,9 @@ function TopBar({ onMenuToggle }: { onMenuToggle: () => void }) {
           <Button
             size="sm"
             onClick={() => { window.location.href = getLoginUrl(); }}
-            className="dp-gradient-bg hover:opacity-90 text-white font-semibold text-xs sm:text-sm dp-glow-sm"
+            className="dp-gradient-bg hover:opacity-90 text-white font-semibold text-[11px] sm:text-sm px-2.5 sm:px-3 dp-glow-sm"
           >
-            Giriş Yap
+            Giriş
           </Button>
         )}
       </div>
@@ -325,6 +327,7 @@ function MobileSidebar({ open, onClose }: { open: boolean; onClose: () => void }
   const [, setLocation] = useLocation();
   const { section } = useSection();
   const { user, isAuthenticated, logout } = useAuth();
+  const { theme, toggleTheme } = useTheme();
   const items = section === "sports" ? SPORT_ITEMS : CASINO_ITEMS;
 
   // Close sidebar on route change
@@ -413,6 +416,14 @@ function MobileSidebar({ open, onClose }: { open: boolean; onClose: () => void }
 
             {/* Footer - user info & actions */}
             <div className="border-t border-border p-3 space-y-2">
+              {/* Theme toggle for mobile */}
+              <button
+                onClick={toggleTheme}
+                className="w-full flex items-center gap-3 px-2.5 py-2.5 rounded-md text-sm text-muted-foreground hover:text-foreground hover:bg-sidebar-accent/50 transition-colors sm:hidden"
+              >
+                {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+                <span>{theme === "dark" ? "Açık Tema" : "Koyu Tema"}</span>
+              </button>
               {isAuthenticated ? (
                 <>
                   <button
