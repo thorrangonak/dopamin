@@ -2,17 +2,32 @@ import { eq, desc, and, sql, inArray, asc, lte, gte, isNull, or } from "drizzle-
 import { drizzle } from "drizzle-orm/mysql2";
 import { InsertUser, users, balances, transactions, bets, betItems, sportsCache, eventsCache, casinoGames, vipProfiles, banners, type InsertBanner, chatMessages, wallets, cryptoDeposits, cryptoWithdrawals, provablyFairSeeds, casinoGameSessions, responsibleGamblingSettings, responsibleGamblingLog, rtpTracking, slotSessions, slotTransactions } from "../drizzle/schema";
 import { ENV } from './_core/env';
+import { createTunnelConnection } from './lib/tunnel-stream';
 
-let _db: ReturnType<typeof drizzle> | null = null;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let _db: any = null;
 
 // Lazily create the drizzle instance so local tooling can run without a DB.
 export async function getDb() {
-  if (!_db && process.env.DATABASE_URL) {
-    try {
-      _db = drizzle(process.env.DATABASE_URL);
-    } catch (error) {
-      console.warn("[Database] Failed to connect:", error);
-      _db = null;
+  if (!_db) {
+    const tunnelUrl = process.env.TUNNEL_URL;
+    const dbUrl = process.env.DATABASE_URL;
+
+    if (tunnelUrl) {
+      try {
+        const conn = await createTunnelConnection(tunnelUrl, dbUrl);
+        _db = drizzle(conn);
+      } catch (error) {
+        console.warn("[Database] Tunnel connection failed:", error);
+        _db = null;
+      }
+    } else if (dbUrl) {
+      try {
+        _db = drizzle(dbUrl);
+      } catch (error) {
+        console.warn("[Database] Failed to connect:", error);
+        _db = null;
+      }
     }
   }
   return _db;

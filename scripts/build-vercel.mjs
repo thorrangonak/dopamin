@@ -13,6 +13,8 @@ const shared = {
   banner: { js: banner },
   // Node builtins are auto-external with platform=node.
   // Bundle all npm packages (no --packages=external).
+  // ws optional native deps can't be bundled — ws works fine without them.
+  external: ["bufferutil", "utf-8-validate"],
   minify: false,
   sourcemap: false,
 };
