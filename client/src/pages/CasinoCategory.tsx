@@ -86,10 +86,23 @@ export default function CasinoCategory() {
   const category = params?.category || "popular";
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<"all" | "hot" | "new">("all");
+  const [selectedVendor, setSelectedVendor] = useState<string>("all");
 
   // Fetch real BLAS345 games for slots category
   const isSlots = category === "slots";
   const slotsQ = trpc.slots.games.useQuery(undefined, { enabled: isSlots });
+
+  // Extract unique vendors sorted by game count
+  const vendors = useMemo(() => {
+    if (!slotsQ.data) return [];
+    const counts: Record<string, number> = {};
+    for (const g of slotsQ.data) {
+      counts[g.vendor] = (counts[g.vendor] || 0) + 1;
+    }
+    return Object.entries(counts)
+      .sort((a, b) => b[1] - a[1])
+      .map(([name, count]) => ({ name, count }));
+  }, [slotsQ.data]);
 
   // For popular/all/favorites/vip, combine all games
   const rawGames = useMemo(() => {
@@ -99,10 +112,13 @@ export default function CasinoCategory() {
     return GAMES_DB[category] || [];
   }, [category]);
 
-  // Filter BLAS345 slot games
+  // Filter BLAS345 slot games by search + vendor
   const filteredSlotGames = useMemo(() => {
     if (!isSlots || !slotsQ.data) return [];
     let filtered = slotsQ.data;
+    if (selectedVendor !== "all") {
+      filtered = filtered.filter(g => g.vendor === selectedVendor);
+    }
     if (search) {
       const q = search.toLowerCase();
       filtered = filtered.filter(g =>
@@ -110,7 +126,7 @@ export default function CasinoCategory() {
       );
     }
     return filtered;
-  }, [isSlots, slotsQ.data, search]);
+  }, [isSlots, slotsQ.data, search, selectedVendor]);
 
   const games = useMemo(() => {
     let filtered = rawGames;
@@ -151,10 +167,23 @@ export default function CasinoCategory() {
     );
   }
 
+  // Vendor display names
+  const vendorLabel = (v: string) => {
+    const map: Record<string, string> = {
+      pragmatic: "Pragmatic Play", egt: "EGT", amatic: "Amatic", netent: "NetEnt",
+      egtdgtl: "EGT Digital", novomatic: "Novomatic", playngo: "Play'n GO",
+      yggdrasil: "Yggdrasil", aristocrat: "Aristocrat", isoftbet: "iSoftBet",
+      bomba: "Bomba Games", noble: "Noble Gaming", redtiger: "Red Tiger",
+      playtech: "Playtech", merkur: "Merkur", blueprint: "Blueprint",
+    };
+    return map[v] || v.charAt(0).toUpperCase() + v.slice(1);
+  };
+
   // ─── Slots category: real BLAS345 games ───
   if (isSlots) {
     return (
       <div className="p-4 md:p-6 space-y-6">
+        {/* Header */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <h1 className="text-xl font-bold text-foreground">{title}</h1>
           <div className="flex items-center gap-2">
@@ -170,6 +199,35 @@ export default function CasinoCategory() {
             </div>
           </div>
         </div>
+
+        {/* Vendor filter pills */}
+        {vendors.length > 0 && (
+          <div className="flex flex-wrap gap-1.5">
+            <button
+              onClick={() => setSelectedVendor("all")}
+              className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${
+                selectedVendor === "all"
+                  ? "bg-primary text-primary-foreground"
+                  : "bg-secondary text-muted-foreground hover:text-foreground hover:bg-secondary/80"
+              }`}
+            >
+              Tumu ({slotsQ.data?.length || 0})
+            </button>
+            {vendors.map(v => (
+              <button
+                key={v.name}
+                onClick={() => setSelectedVendor(v.name === selectedVendor ? "all" : v.name)}
+                className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${
+                  selectedVendor === v.name
+                    ? "bg-primary text-primary-foreground"
+                    : "bg-secondary text-muted-foreground hover:text-foreground hover:bg-secondary/80"
+                }`}
+              >
+                {vendorLabel(v.name)} ({v.count})
+              </button>
+            ))}
+          </div>
+        )}
 
         {slotsQ.isLoading ? (
           <div className="flex items-center justify-center py-16">
@@ -213,7 +271,7 @@ export default function CasinoCategory() {
                     <div className="p-2.5">
                       <div className="text-xs font-semibold text-foreground truncate">{game.display_name}</div>
                       <div className="flex items-center justify-between mt-0.5">
-                        <span className="text-[10px] text-muted-foreground truncate">{game.vendor}</span>
+                        <span className="text-[10px] text-muted-foreground truncate">{vendorLabel(game.vendor)}</span>
                       </div>
                     </div>
                   </button>
