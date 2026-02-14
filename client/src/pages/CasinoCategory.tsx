@@ -1,8 +1,76 @@
 import { useLocation, useRoute } from "wouter";
-import { Search, Star, Flame, SlidersHorizontal, Loader2 } from "lucide-react";
-import { useState, useMemo } from "react";
+import { Search, Star, Flame, SlidersHorizontal, Loader2, ChevronLeft, ChevronRight } from "lucide-react";
+import { useState, useMemo, useRef, useCallback } from "react";
 import { toast } from "sonner";
 import { trpc } from "@/lib/trpc";
+
+// ─── Vendor logo SVGs (white paths, colored when active) ───
+const VENDOR_LOGOS: Record<string, { label: string; svg: string }> = {
+  pragmatic: {
+    label: "Pragmatic Play",
+    svg: `<svg viewBox="0 0 80 28" fill="currentColor"><text x="2" y="20" font-size="11" font-weight="800" font-family="system-ui" letter-spacing="-0.5">PRAGMATIC</text><text x="2" y="27" font-size="6" font-weight="600" font-family="system-ui" letter-spacing="3">PLAY</text></svg>`,
+  },
+  egt: {
+    label: "EGT",
+    svg: `<svg viewBox="0 0 50 28" fill="currentColor"><text x="4" y="22" font-size="22" font-weight="900" font-family="system-ui" letter-spacing="1">EGT</text></svg>`,
+  },
+  amatic: {
+    label: "Amatic",
+    svg: `<svg viewBox="0 0 70 28" fill="currentColor"><text x="3" y="21" font-size="16" font-weight="800" font-family="system-ui" letter-spacing="0.5">AMATIC</text></svg>`,
+  },
+  netent: {
+    label: "NetEnt",
+    svg: `<svg viewBox="0 0 70 28" fill="currentColor"><text x="5" y="20" font-size="15" font-weight="300" font-family="system-ui">Net</text><text x="34" y="20" font-size="15" font-weight="800" font-family="system-ui">Ent</text></svg>`,
+  },
+  egtdgtl: {
+    label: "EGT Digital",
+    svg: `<svg viewBox="0 0 80 28" fill="currentColor"><text x="2" y="18" font-size="14" font-weight="900" font-family="system-ui" letter-spacing="1">EGT</text><text x="2" y="27" font-size="8" font-weight="500" font-family="system-ui" letter-spacing="1.5">DIGITAL</text></svg>`,
+  },
+  novomatic: {
+    label: "Novomatic",
+    svg: `<svg viewBox="0 0 90 28" fill="currentColor"><text x="3" y="20" font-size="13" font-weight="700" font-family="system-ui" letter-spacing="1">NOVOMATIC</text></svg>`,
+  },
+  playngo: {
+    label: "Play'n GO",
+    svg: `<svg viewBox="0 0 80 28" fill="currentColor"><text x="3" y="18" font-size="11" font-weight="700" font-family="system-ui">Play'n</text><text x="45" y="18" font-size="11" font-weight="900" font-family="system-ui">GO</text></svg>`,
+  },
+  yggdrasil: {
+    label: "Yggdrasil",
+    svg: `<svg viewBox="0 0 80 28" fill="currentColor"><text x="3" y="20" font-size="13" font-weight="700" font-family="system-ui" letter-spacing="-0.3">YGGDRASIL</text></svg>`,
+  },
+  aristocrat: {
+    label: "Aristocrat",
+    svg: `<svg viewBox="0 0 90 28" fill="currentColor"><text x="3" y="20" font-size="13" font-weight="600" font-family="system-ui" letter-spacing="0.5">ARISTOCRAT</text></svg>`,
+  },
+  isoftbet: {
+    label: "iSoftBet",
+    svg: `<svg viewBox="0 0 70 28" fill="currentColor"><text x="3" y="20" font-size="12" font-weight="300" font-family="system-ui">i</text><text x="9" y="20" font-size="12" font-weight="800" font-family="system-ui">SoftBet</text></svg>`,
+  },
+  bomba: {
+    label: "Bomba",
+    svg: `<svg viewBox="0 0 65 28" fill="currentColor"><text x="3" y="21" font-size="16" font-weight="900" font-family="system-ui" letter-spacing="-0.5">BOMBA</text></svg>`,
+  },
+  noble: {
+    label: "Noble",
+    svg: `<svg viewBox="0 0 60 28" fill="currentColor"><text x="3" y="20" font-size="15" font-weight="700" font-family="system-ui" letter-spacing="1">NOBLE</text></svg>`,
+  },
+  redtiger: {
+    label: "Red Tiger",
+    svg: `<svg viewBox="0 0 80 28" fill="currentColor"><text x="3" y="18" font-size="10" font-weight="900" font-family="system-ui" letter-spacing="0.5">RED</text><text x="28" y="18" font-size="10" font-weight="400" font-family="system-ui" letter-spacing="0.5">TIGER</text></svg>`,
+  },
+  playtech: {
+    label: "Playtech",
+    svg: `<svg viewBox="0 0 80 28" fill="currentColor"><text x="3" y="20" font-size="14" font-weight="700" font-family="system-ui" letter-spacing="-0.3">playtech</text></svg>`,
+  },
+  merkur: {
+    label: "Merkur",
+    svg: `<svg viewBox="0 0 70 28" fill="currentColor"><text x="3" y="21" font-size="15" font-weight="800" font-family="system-ui" letter-spacing="0.5">MERKUR</text></svg>`,
+  },
+  blueprint: {
+    label: "Blueprint",
+    svg: `<svg viewBox="0 0 80 28" fill="currentColor"><text x="3" y="20" font-size="12" font-weight="700" font-family="system-ui" letter-spacing="0.3">BLUEPRINT</text></svg>`,
+  },
+};
 
 type Game = {
   name: string;
@@ -167,65 +235,120 @@ export default function CasinoCategory() {
     );
   }
 
-  // Vendor display names
-  const vendorLabel = (v: string) => {
-    const map: Record<string, string> = {
-      pragmatic: "Pragmatic Play", egt: "EGT", amatic: "Amatic", netent: "NetEnt",
-      egtdgtl: "EGT Digital", novomatic: "Novomatic", playngo: "Play'n GO",
-      yggdrasil: "Yggdrasil", aristocrat: "Aristocrat", isoftbet: "iSoftBet",
-      bomba: "Bomba Games", noble: "Noble Gaming", redtiger: "Red Tiger",
-      playtech: "Playtech", merkur: "Merkur", blueprint: "Blueprint",
-    };
-    return map[v] || v.charAt(0).toUpperCase() + v.slice(1);
-  };
+  const vendorLabel = (v: string) => VENDOR_LOGOS[v]?.label || v.charAt(0).toUpperCase() + v.slice(1);
+
+  // Scroll helpers for vendor bar
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [canScrollLeft, setCanScrollLeft] = useState(false);
+  const [canScrollRight, setCanScrollRight] = useState(true);
+
+  const checkScroll = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    setCanScrollLeft(el.scrollLeft > 4);
+    setCanScrollRight(el.scrollLeft < el.scrollWidth - el.clientWidth - 4);
+  }, []);
+
+  const scrollBy = useCallback((dir: number) => {
+    scrollRef.current?.scrollBy({ left: dir * 200, behavior: "smooth" });
+  }, []);
 
   // ─── Slots category: real BLAS345 games ───
   if (isSlots) {
     return (
-      <div className="p-4 md:p-6 space-y-6">
+      <div className="p-4 md:p-6 space-y-5">
         {/* Header */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <h1 className="text-xl font-bold text-foreground">{title}</h1>
-          <div className="flex items-center gap-2">
-            <div className="relative flex-1 sm:w-64">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <input
-                type="text"
-                placeholder="Oyun ara..."
-                value={search}
-                onChange={e => setSearch(e.target.value)}
-                className="w-full pl-9 pr-3 py-2 bg-secondary border border-border rounded-lg text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-              />
-            </div>
+          <div className="relative w-full sm:w-64">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <input
+              type="text"
+              placeholder="Oyun veya saglayici ara..."
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              className="w-full pl-9 pr-3 py-2 bg-secondary border border-border rounded-lg text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+            />
           </div>
         </div>
 
-        {/* Vendor filter pills */}
+        {/* ─── Vendor scroll bar ─── */}
         {vendors.length > 0 && (
-          <div className="flex flex-wrap gap-1.5">
-            <button
-              onClick={() => setSelectedVendor("all")}
-              className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${
-                selectedVendor === "all"
-                  ? "bg-primary text-primary-foreground"
-                  : "bg-secondary text-muted-foreground hover:text-foreground hover:bg-secondary/80"
-              }`}
-            >
-              Tumu ({slotsQ.data?.length || 0})
-            </button>
-            {vendors.map(v => (
+          <div className="relative group/scroll">
+            {/* Left arrow */}
+            {canScrollLeft && (
               <button
-                key={v.name}
-                onClick={() => setSelectedVendor(v.name === selectedVendor ? "all" : v.name)}
-                className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${
-                  selectedVendor === v.name
-                    ? "bg-primary text-primary-foreground"
-                    : "bg-secondary text-muted-foreground hover:text-foreground hover:bg-secondary/80"
+                onClick={() => scrollBy(-1)}
+                className="absolute left-0 top-0 bottom-0 z-10 w-8 flex items-center justify-center bg-gradient-to-r from-background via-background/90 to-transparent"
+              >
+                <ChevronLeft className="h-4 w-4 text-muted-foreground" />
+              </button>
+            )}
+            {/* Right arrow */}
+            {canScrollRight && (
+              <button
+                onClick={() => scrollBy(1)}
+                className="absolute right-0 top-0 bottom-0 z-10 w-8 flex items-center justify-center bg-gradient-to-l from-background via-background/90 to-transparent"
+              >
+                <ChevronRight className="h-4 w-4 text-muted-foreground" />
+              </button>
+            )}
+
+            <div
+              ref={scrollRef}
+              onScroll={checkScroll}
+              className="flex gap-2 overflow-x-auto scrollbar-hide px-1 py-1 -mx-1 snap-x snap-mandatory"
+            >
+              {/* "All" chip */}
+              <button
+                onClick={() => setSelectedVendor("all")}
+                className={`snap-start shrink-0 flex items-center justify-center h-12 px-5 rounded-xl border transition-all duration-200 ${
+                  selectedVendor === "all"
+                    ? "bg-primary/10 border-primary text-primary shadow-sm shadow-primary/20"
+                    : "bg-card border-border text-muted-foreground/70 hover:border-muted-foreground/40 hover:text-foreground"
                 }`}
               >
-                {vendorLabel(v.name)} ({v.count})
+                <span className="text-xs font-bold whitespace-nowrap">
+                  Tumu
+                </span>
+                <span className={`ml-1.5 text-[10px] font-medium ${selectedVendor === "all" ? "text-primary/70" : "text-muted-foreground/50"}`}>
+                  {slotsQ.data?.length || 0}
+                </span>
               </button>
-            ))}
+
+              {vendors.map(v => {
+                const isActive = selectedVendor === v.name;
+                const logo = VENDOR_LOGOS[v.name];
+                return (
+                  <button
+                    key={v.name}
+                    onClick={() => setSelectedVendor(v.name === selectedVendor ? "all" : v.name)}
+                    className={`snap-start shrink-0 flex items-center gap-2 h-12 px-4 rounded-xl border transition-all duration-200 ${
+                      isActive
+                        ? "bg-primary/10 border-primary text-primary shadow-sm shadow-primary/20"
+                        : "bg-card border-border text-muted-foreground/70 hover:border-muted-foreground/40 hover:text-foreground"
+                    }`}
+                  >
+                    {logo ? (
+                      <span
+                        className="h-5 w-auto shrink-0"
+                        dangerouslySetInnerHTML={{
+                          __html: logo.svg.replace(
+                            'viewBox=',
+                            `class="h-5 w-auto" viewBox=`
+                          ),
+                        }}
+                      />
+                    ) : (
+                      <span className="text-xs font-bold whitespace-nowrap">{vendorLabel(v.name)}</span>
+                    )}
+                    <span className={`text-[10px] font-medium ${isActive ? "text-primary/70" : "text-muted-foreground/50"}`}>
+                      {v.count}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
           </div>
         )}
 
@@ -240,7 +363,12 @@ export default function CasinoCategory() {
           </div>
         ) : (
           <>
-            <p className="text-sm text-muted-foreground">{filteredSlotGames.length} oyun bulundu</p>
+            <div className="flex items-center justify-between">
+              <p className="text-sm text-muted-foreground">
+                {selectedVendor !== "all" && <span className="text-foreground font-medium">{vendorLabel(selectedVendor)} — </span>}
+                {filteredSlotGames.length} oyun
+              </p>
+            </div>
             {filteredSlotGames.length === 0 ? (
               <div className="text-center py-16">
                 <p className="text-muted-foreground">Bu kategoride oyun bulunamadi.</p>

@@ -180,6 +180,10 @@
   background: var(--muted-foreground);
 }
 
+/* Hide scrollbar utility */
+.scrollbar-hide::-webkit-scrollbar { display: none; }
+.scrollbar-hide { scrollbar-width: none; -ms-overflow-style: none; }
+
 /* ─── Dopamin Brand Utilities ─── */
 
 /* ─── Dopamin Wordmark ─── */
