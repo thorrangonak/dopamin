@@ -62,16 +62,25 @@ export async function blas345Games(): Promise<{ done: number; games: Blas345Game
   params.Hash = blas345Hash(params);
 
   const url = `${API_URL()}/games?${new URLSearchParams(params)}`;
-  const res = await fetch(url);
-  const data = await res.json() as { done: number; games?: Record<string, Blas345Game> | Blas345Game[] };
+  console.log("[BLAS345] Fetching games from:", url);
 
-  if (data.done === 1 && data.games) {
-    // API returns games as { "1": {...}, "2": {...} } object — convert to array
-    const games = Array.isArray(data.games) ? data.games : Object.values(data.games);
-    gamesCache = { data: games, ts: Date.now() };
-    return { done: 1, games };
+  try {
+    const res = await fetch(url);
+    const data = await res.json() as { done: number; games?: Record<string, Blas345Game> | Blas345Game[] };
+    console.log("[BLAS345] Response done:", data.done, "has games:", !!data.games);
+
+    if (data.done === 1 && data.games) {
+      // API returns games as { "1": {...}, "2": {...} } object — convert to array
+      const games = Array.isArray(data.games) ? data.games : Object.values(data.games);
+      gamesCache = { data: games, ts: Date.now() };
+      return { done: 1, games };
+    }
+    console.error("[BLAS345] Unexpected response:", JSON.stringify(data).slice(0, 500));
+    return { done: 0, games: [] };
+  } catch (err: any) {
+    console.error("[BLAS345] Fetch error:", err.message);
+    return { done: 0, games: [] };
   }
-  return { done: 0, games: [] };
 }
 
 // ─── Close: end a game session ───
