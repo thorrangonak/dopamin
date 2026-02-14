@@ -1,6 +1,6 @@
 import { eq, desc, and, sql, inArray, asc, lte, gte, isNull, or } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
-import { InsertUser, users, balances, transactions, bets, betItems, sportsCache, eventsCache, casinoGames, vipProfiles, banners, type InsertBanner, chatMessages, wallets, cryptoDeposits, cryptoWithdrawals, provablyFairSeeds, casinoGameSessions, responsibleGamblingSettings, responsibleGamblingLog, rtpTracking } from "../drizzle/schema";
+import { InsertUser, users, balances, transactions, bets, betItems, sportsCache, eventsCache, casinoGames, vipProfiles, banners, type InsertBanner, chatMessages, wallets, cryptoDeposits, cryptoWithdrawals, provablyFairSeeds, casinoGameSessions, responsibleGamblingSettings, responsibleGamblingLog, rtpTracking, slotSessions, slotTransactions } from "../drizzle/schema";
 import { ENV } from './_core/env';
 
 let _db: ReturnType<typeof drizzle> | null = null;
@@ -1083,4 +1083,47 @@ export async function getAllCasinoGames(limit = 100) {
   const db = await getDb();
   if (!db) return [];
   return db.select().from(casinoGames).orderBy(desc(casinoGames.createdAt)).limit(limit);
+}
+
+// ─── Slot Session & Transaction Helpers (BLAS345) ───
+
+export async function createSlotSession(userId: number, gameId: string) {
+  const db = await getDb();
+  if (!db) return null;
+  const [inserted] = await db.insert(slotSessions).values({ userId, gameId }).$returningId();
+  return inserted.id;
+}
+
+export async function getActiveSlotSession(userId: number) {
+  const db = await getDb();
+  if (!db) return null;
+  const result = await db.select().from(slotSessions)
+    .where(and(eq(slotSessions.userId, userId), eq(slotSessions.status, "active")))
+    .orderBy(desc(slotSessions.createdAt))
+    .limit(1);
+  return result.length > 0 ? result[0] : null;
+}
+
+export async function closeSlotSession(userId: number) {
+  const db = await getDb();
+  if (!db) return;
+  await db.update(slotSessions).set({ status: "closed", closedAt: new Date() })
+    .where(and(eq(slotSessions.userId, userId), eq(slotSessions.status, "active")));
+}
+
+export async function createSlotTransaction(data: {
+  userId: number;
+  sessionId: number | null;
+  blas345StatId: string;
+  gameId: string;
+  type: number;
+  bet: string;
+  win: string;
+  balanceBefore: string;
+  balanceAfter: string;
+}) {
+  const db = await getDb();
+  if (!db) return null;
+  const [inserted] = await db.insert(slotTransactions).values(data).$returningId();
+  return inserted.id;
 }

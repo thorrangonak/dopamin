@@ -38,11 +38,14 @@ import {
   getUserWagerTotal, getUserLossTotal,
   // RTP
   updateRtpTracking, getRtpReport, getRtpSummary, getAllCasinoGames,
+  // Slots (BLAS345)
+  createSlotSession, closeSlotSession,
 } from "./db";
 import { generateAddress } from "./lib/wallet/hdDerivation";
 import { NETWORKS, NETWORK_IDS, type NetworkId, getAutoApproveLimit, WITHDRAWAL_LIMITS } from "./lib/wallet/index";
 import { getAllDepositBalances, getHotWalletBalances, sweepAll } from "./lib/wallet/hotWallet";
 import { settleBets } from "./settlement";
+import { blas345Games, blas345Login, blas345Close } from "./lib/blas345";
 import {
   playCoinFlip, playDice, playRoulette, playPlinko, playCrash,
   generateMinePositions, calculateMinesMultiplier,
@@ -2292,6 +2295,52 @@ export const appRouter = router({
         await updateWithdrawalStatus(input.id, "rejected", undefined, ctx.user.id, input.note);
         return { success: true };
       }),
+  }),
+
+  // ─── Slots (BLAS345) ───
+  slots: router({
+    games: publicProcedure.query(async () => {
+      const result = await blas345Games();
+      return result.games;
+    }),
+
+    launch: protectedProcedure
+      .input(z.object({ gameId: z.string() }))
+      .mutation(async ({ ctx, input }) => {
+        const bal = await getOrCreateBalance(ctx.user.id);
+        const balance = bal?.amount || "0.00";
+
+        const callbackUrl = `https://dopamin.dev/api/slots/callback`;
+        const exitUrl = `https://dopamin.dev/casino/slots`;
+
+        const result = await blas345Login({
+          customerId: ctx.user.id,
+          balance,
+          callbackUrl,
+          gameId: input.gameId,
+          exitUrl,
+          language: "TR",
+        });
+
+        if (result.done !== 1 || !result.url) {
+          throw new TRPCError({
+            code: "INTERNAL_SERVER_ERROR",
+            message: result.errors || "Oyun başlatılamadı",
+          });
+        }
+
+        // Close any existing session and create a new one
+        await closeSlotSession(ctx.user.id);
+        await createSlotSession(ctx.user.id, input.gameId);
+
+        return { url: result.url };
+      }),
+
+    close: protectedProcedure.mutation(async ({ ctx }) => {
+      await closeSlotSession(ctx.user.id);
+      await blas345Close({ customerId: ctx.user.id });
+      return { success: true };
+    }),
   }),
 });
 

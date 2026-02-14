@@ -16,6 +16,7 @@
   "rewrites": [
     { "source": "/api/trpc/:path*", "destination": "/api/trpc/[trpc]" },
     { "source": "/api/oauth/callback", "destination": "/api/oauth/callback" },
+    { "source": "/api/slots/callback", "destination": "/api/slots/callback" },
     { "source": "/((?!api/).*)", "destination": "/index.html" }
   ]
 }

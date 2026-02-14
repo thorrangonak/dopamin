@@ -34,6 +34,7 @@ import LimboGame from "./pages/games/Limbo";
 import HiloGame from "./pages/games/Hilo";
 import ProvablyFair from "./pages/ProvablyFair";
 import ResponsibleGambling from "./pages/ResponsibleGambling";
+import SlotGame from "./pages/SlotGame";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
 
@@ -64,6 +65,9 @@ function Router() {
               {/* Casino */}
               <Route path="/casino" component={CasinoHome} />
               <Route path="/casino/:category" component={CasinoCategory} />
+
+              {/* Slot Games (BLAS345 iframe) */}
+              <Route path="/slot/:gameId" component={SlotGame} />
 
               {/* Casino Games */}
               <Route path="/game/coinflip" component={CoinFlip} />

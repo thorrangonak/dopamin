@@ -1,7 +1,8 @@
 import { useLocation, useRoute } from "wouter";
-import { Search, Star, Flame, SlidersHorizontal } from "lucide-react";
+import { Search, Star, Flame, SlidersHorizontal, Loader2 } from "lucide-react";
 import { useState, useMemo } from "react";
 import { toast } from "sonner";
+import { trpc } from "@/lib/trpc";
 
 type Game = {
   name: string;
@@ -12,24 +13,6 @@ type Game = {
 };
 
 const GAMES_DB: Record<string, Game[]> = {
-  slots: [
-    { name: "Sweet Bonanza", provider: "Pragmatic Play", rtp: 96.5, hot: true, new: false },
-    { name: "Gates of Olympus", provider: "Pragmatic Play", rtp: 96.5, hot: true, new: false },
-    { name: "Big Bass Bonanza", provider: "Pragmatic Play", rtp: 96.7, hot: false, new: false },
-    { name: "Sugar Rush", provider: "Pragmatic Play", rtp: 96.5, hot: true, new: true },
-    { name: "Starlight Princess", provider: "Pragmatic Play", rtp: 96.5, hot: true, new: false },
-    { name: "Book of Dead", provider: "Play'n GO", rtp: 96.2, hot: true, new: false },
-    { name: "Starburst", provider: "NetEnt", rtp: 96.1, hot: false, new: false },
-    { name: "Gonzo's Quest", provider: "NetEnt", rtp: 95.9, hot: false, new: false },
-    { name: "Reactoonz", provider: "Play'n GO", rtp: 96.5, hot: false, new: false },
-    { name: "Jammin' Jars", provider: "Push Gaming", rtp: 96.8, hot: false, new: false },
-    { name: "Razor Shark", provider: "Push Gaming", rtp: 96.7, hot: true, new: false },
-    { name: "Fruit Party", provider: "Pragmatic Play", rtp: 96.5, hot: false, new: false },
-    { name: "Dog House", provider: "Pragmatic Play", rtp: 96.5, hot: false, new: true },
-    { name: "Wild West Gold", provider: "Pragmatic Play", rtp: 96.5, hot: true, new: false },
-    { name: "Buffalo King", provider: "Pragmatic Play", rtp: 96.1, hot: false, new: false },
-    { name: "Wanted Dead or Wild", provider: "Hacksaw", rtp: 96.4, hot: true, new: true },
-  ],
   blackjack: [
     { name: "Blackjack Classic", provider: "Evolution", rtp: 99.5, hot: true, new: false },
     { name: "Blackjack VIP", provider: "Evolution", rtp: 99.5, hot: true, new: false },
@@ -83,25 +66,30 @@ const GAMES_DB: Record<string, Game[]> = {
 };
 
 const CATEGORY_TITLES: Record<string, string> = {
-  slots: "🎰 Slots",
-  blackjack: "🃏 Blackjack",
-  roulette: "🎡 Rulet",
-  poker: "♠️ Poker",
-  dice: "🎲 Zar Oyunları",
-  baccarat: "🍀 Baccarat",
-  live: "⚡ Canlı Casino",
-  popular: "🔥 Popüler Oyunlar",
-  favorites: "⭐ Favoriler",
-  vip: "👑 VIP Oyunlar",
-  promotions: "🎁 Promosyonlar",
-  all: "📂 Tüm Oyunlar",
+  slots: "Slots",
+  blackjack: "Blackjack",
+  roulette: "Rulet",
+  poker: "Poker",
+  dice: "Zar Oyunlari",
+  baccarat: "Baccarat",
+  live: "Canli Casino",
+  popular: "Populer Oyunlar",
+  favorites: "Favoriler",
+  vip: "VIP Oyunlar",
+  promotions: "Promosyonlar",
+  all: "Tum Oyunlar",
 };
 
 export default function CasinoCategory() {
   const [, params] = useRoute("/casino/:category");
+  const [, setLocation] = useLocation();
   const category = params?.category || "popular";
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<"all" | "hot" | "new">("all");
+
+  // Fetch real BLAS345 games for slots category
+  const isSlots = category === "slots";
+  const slotsQ = trpc.slots.games.useQuery(undefined, { enabled: isSlots });
 
   // For popular/all/favorites/vip, combine all games
   const rawGames = useMemo(() => {
@@ -110,6 +98,19 @@ export default function CasinoCategory() {
     }
     return GAMES_DB[category] || [];
   }, [category]);
+
+  // Filter BLAS345 slot games
+  const filteredSlotGames = useMemo(() => {
+    if (!isSlots || !slotsQ.data) return [];
+    let filtered = slotsQ.data;
+    if (search) {
+      const q = search.toLowerCase();
+      filtered = filtered.filter(g =>
+        g.display_name.toLowerCase().includes(q) || g.vendor.toLowerCase().includes(q)
+      );
+    }
+    return filtered;
+  }, [isSlots, slotsQ.data, search]);
 
   const games = useMemo(() => {
     let filtered = rawGames;
@@ -130,15 +131,15 @@ export default function CasinoCategory() {
         <h1 className="text-xl font-bold text-foreground">{title}</h1>
         <div className="grid md:grid-cols-2 gap-4">
           {[
-            { title: "🎉 Hoş Geldin Bonusu", desc: "İlk yatırımına %100 bonus, 1000 TL'ye kadar! Minimum 50 TL yatırım gereklidir.", tag: "YENİ ÜYELER", color: "from-primary/20 to-emerald-500/20" },
-            { title: "💰 Haftalık Cashback", desc: "Her Pazartesi, önceki haftanın kayıplarının %10'u hesabına iade edilir.", tag: "HER HAFTA", color: "from-blue-500/20 to-cyan-500/20" },
-            { title: "👥 Arkadaşını Getir", desc: "Referans linkini paylaş, kayıt olan her arkadaşın için 50 TL bonus kazan!", tag: "SÜREKLİ", color: "from-purple-500/20 to-pink-500/20" },
-            { title: "🎰 Slot Turnuvası", desc: "Her Cuma 20:00'de başlayan slot turnuvasında 10.000 TL ödül havuzu!", tag: "HAFTALIK", color: "from-orange-500/20 to-red-500/20" },
-            { title: "🏆 VIP Programı", desc: "Oynadıkça seviye atla, özel bonuslar ve kişisel hesap yöneticisi kazan!", tag: "VIP", color: "from-yellow-500/20 to-amber-500/20" },
-            { title: "🎲 Günün Oyunu", desc: "Her gün seçilen oyunda %20 ekstra kazanç fırsatı!", tag: "GÜNLÜK", color: "from-teal-500/20 to-green-500/20" },
+            { title: "Hos Geldin Bonusu", desc: "Ilk yatirimina %100 bonus, 1000 TL'ye kadar! Minimum 50 TL yatirim gereklidir.", tag: "YENI UYELER", color: "from-primary/20 to-emerald-500/20" },
+            { title: "Haftalik Cashback", desc: "Her Pazartesi, onceki haftanin kayiplarinin %10'u hesabina iade edilir.", tag: "HER HAFTA", color: "from-blue-500/20 to-cyan-500/20" },
+            { title: "Arkadasini Getir", desc: "Referans linkini paylas, kayit olan her arkadasin icin 50 TL bonus kazan!", tag: "SUREKLI", color: "from-purple-500/20 to-pink-500/20" },
+            { title: "Slot Turnuvasi", desc: "Her Cuma 20:00'de baslayan slot turenuvasinda 10.000 TL odul havuzu!", tag: "HAFTALIK", color: "from-orange-500/20 to-red-500/20" },
+            { title: "VIP Programi", desc: "Oynadikca seviye atla, ozel bonuslar ve kisisel hesap yoneticisi kazan!", tag: "VIP", color: "from-yellow-500/20 to-amber-500/20" },
+            { title: "Gunun Oyunu", desc: "Her gun secilen oyunda %20 ekstra kazanc firsati!", tag: "GUNLUK", color: "from-teal-500/20 to-green-500/20" },
           ].map((promo, i) => (
             <div key={i} className={`bg-gradient-to-br ${promo.color} border border-border rounded-xl p-5 hover:border-primary/30 transition-colors cursor-pointer`}
-              onClick={() => toast.info("Promosyon detayları yakında aktif olacak!")}
+              onClick={() => toast.info("Promosyon detaylari yakinda aktif olacak!")}
             >
               <span className="text-xs font-bold text-primary bg-primary/10 px-2 py-0.5 rounded">{promo.tag}</span>
               <h3 className="text-base font-bold text-foreground mt-2">{promo.title}</h3>
@@ -146,6 +147,81 @@ export default function CasinoCategory() {
             </div>
           ))}
         </div>
+      </div>
+    );
+  }
+
+  // ─── Slots category: real BLAS345 games ───
+  if (isSlots) {
+    return (
+      <div className="p-4 md:p-6 space-y-6">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <h1 className="text-xl font-bold text-foreground">{title}</h1>
+          <div className="flex items-center gap-2">
+            <div className="relative flex-1 sm:w-64">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <input
+                type="text"
+                placeholder="Oyun ara..."
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                className="w-full pl-9 pr-3 py-2 bg-secondary border border-border rounded-lg text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+              />
+            </div>
+          </div>
+        </div>
+
+        {slotsQ.isLoading ? (
+          <div className="flex items-center justify-center py-16">
+            <Loader2 className="h-6 w-6 animate-spin text-primary" />
+            <span className="ml-2 text-muted-foreground text-sm">Oyunlar yukleniyor...</span>
+          </div>
+        ) : slotsQ.isError ? (
+          <div className="text-center py-16">
+            <p className="text-destructive">Oyunlar yuklenemedi.</p>
+          </div>
+        ) : (
+          <>
+            <p className="text-sm text-muted-foreground">{filteredSlotGames.length} oyun bulundu</p>
+            {filteredSlotGames.length === 0 ? (
+              <div className="text-center py-16">
+                <p className="text-muted-foreground">Bu kategoride oyun bulunamadi.</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
+                {filteredSlotGames.map((game) => (
+                  <button
+                    key={game.id_game}
+                    onClick={() => setLocation(`/slot/${game.id_game}`)}
+                    className="group rounded-lg bg-card border border-border hover:border-primary/40 transition-all overflow-hidden text-left"
+                  >
+                    <div className="aspect-[3/4] bg-gradient-to-br from-secondary to-accent/30 flex items-center justify-center relative overflow-hidden">
+                      {game.image ? (
+                        <img
+                          src={game.image}
+                          alt={game.display_name}
+                          className="absolute inset-0 w-full h-full object-cover"
+                          loading="lazy"
+                        />
+                      ) : (
+                        <span className="text-4xl opacity-50">🎰</span>
+                      )}
+                      <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                        <span className="px-4 py-2 bg-primary text-primary-foreground rounded-lg text-sm font-semibold">Oyna</span>
+                      </div>
+                    </div>
+                    <div className="p-2.5">
+                      <div className="text-xs font-semibold text-foreground truncate">{game.display_name}</div>
+                      <div className="flex items-center justify-between mt-0.5">
+                        <span className="text-[10px] text-muted-foreground truncate">{game.vendor}</span>
+                      </div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+          </>
+        )}
       </div>
     );
   }
@@ -177,7 +253,7 @@ export default function CasinoCategory() {
                   filter === f ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
                 }`}
               >
-                {f === "all" ? "Tümü" : f === "hot" ? "🔥 Popüler" : "✨ Yeni"}
+                {f === "all" ? "Tumu" : f === "hot" ? "Populer" : "Yeni"}
               </button>
             ))}
           </div>
@@ -190,19 +266,19 @@ export default function CasinoCategory() {
       {/* Games Grid */}
       {games.length === 0 ? (
         <div className="text-center py-16">
-          <p className="text-muted-foreground">Bu kategoride oyun bulunamadı.</p>
+          <p className="text-muted-foreground">Bu kategoride oyun bulunamadi.</p>
         </div>
       ) : (
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
           {games.map((game, i) => (
             <button
               key={`${game.name}-${i}`}
-              onClick={() => toast.info(`${game.name} yakında aktif olacak!`)}
+              onClick={() => toast.info(`${game.name} yakinda aktif olacak!`)}
               className="group rounded-lg bg-card border border-border hover:border-primary/40 transition-all overflow-hidden text-left"
             >
               <div className="aspect-[3/4] bg-gradient-to-br from-secondary to-accent/30 flex items-center justify-center relative">
                 <span className="text-4xl opacity-50 group-hover:opacity-80 transition-opacity">
-                  {category === "slots" || category === "popular" || category === "all" ? "🎰" :
+                  {category === "popular" || category === "all" ? "🎰" :
                    category === "blackjack" ? "🃏" :
                    category === "roulette" ? "🎡" :
                    category === "poker" ? "♠️" :
@@ -214,7 +290,7 @@ export default function CasinoCategory() {
                   <span className="absolute top-2 right-2 bg-destructive text-white text-[10px] font-bold px-1.5 py-0.5 rounded">HOT</span>
                 )}
                 {game.new && !game.hot && (
-                  <span className="absolute top-2 right-2 bg-primary text-primary-foreground text-[10px] font-bold px-1.5 py-0.5 rounded">YENİ</span>
+                  <span className="absolute top-2 right-2 bg-primary text-primary-foreground text-[10px] font-bold px-1.5 py-0.5 rounded">YENI</span>
                 )}
                 {/* Hover overlay */}
                 <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">

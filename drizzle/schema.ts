@@ -314,3 +314,32 @@ export const cryptoWithdrawals = mysqlTable("crypto_withdrawals", {
 });
 
 export type CryptoWithdrawal = typeof cryptoWithdrawals.$inferSelect;
+
+// ─── Slot Sessions (BLAS345) ───
+export const slotSessions = mysqlTable("slot_sessions", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  gameId: varchar("gameId", { length: 64 }).notNull(),
+  status: mysqlEnum("status", ["active", "closed"]).default("active").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  closedAt: timestamp("closedAt"),
+});
+
+export type SlotSession = typeof slotSessions.$inferSelect;
+
+// ─── Slot Transactions (BLAS345 callbacks) ───
+export const slotTransactions = mysqlTable("slot_transactions", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  sessionId: int("sessionId"),
+  blas345StatId: varchar("blas345StatId", { length: 64 }),
+  gameId: varchar("gameId", { length: 64 }).notNull(),
+  type: int("type").notNull(), // 1=spin, 2=gamble, 3=bonus
+  bet: decimal("bet", { precision: 12, scale: 2 }).notNull(),
+  win: decimal("win", { precision: 12, scale: 2 }).notNull(),
+  balanceBefore: decimal("balanceBefore", { precision: 12, scale: 2 }).notNull(),
+  balanceAfter: decimal("balanceAfter", { precision: 12, scale: 2 }).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type SlotTransaction = typeof slotTransactions.$inferSelect;

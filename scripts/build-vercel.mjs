@@ -33,6 +33,11 @@ await Promise.all([
     entryPoints: ["server/vercel/cron-handler.ts"],
     outfile: "api/cron/check-deposits.js",
   }),
+  build({
+    ...shared,
+    entryPoints: ["server/vercel/slots-callback-handler.ts"],
+    outfile: "api/slots/callback.js",
+  }),
 ]);
 
 console.log("✓ Vercel functions bundled");
