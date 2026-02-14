@@ -2300,8 +2300,13 @@ export const appRouter = router({
   // ─── Slots (BLAS345) ───
   slots: router({
     games: publicProcedure.query(async () => {
-      const result = await blas345Games();
-      return result.games;
+      try {
+        const result = await blas345Games();
+        return result.games;
+      } catch (err: any) {
+        console.error("[slots.games] Error:", err);
+        throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: err.message || "BLAS345 API error" });
+      }
     }),
 
     launch: protectedProcedure
