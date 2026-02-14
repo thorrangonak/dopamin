@@ -8,6 +8,7 @@ build/
 api/trpc/
 api/oauth/
 api/cron/*.js
+api/slots/
 *.dist
 
 # Environment variables
