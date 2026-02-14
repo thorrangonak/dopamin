@@ -3,7 +3,7 @@
 
 import crypto from "crypto";
 
-const API_URL = () => process.env.BLAS345_API_URL || "https://api.blas345.biz";
+const API_URL = () => (process.env.BLAS345_API_URL || "https://api.blas345.biz") + "/api/v1";
 const ID_USER = () => process.env.BLAS345_ID_USER || "";
 const PASSWORD = () => process.env.BLAS345_PASSWORD || "";
 
@@ -63,11 +63,13 @@ export async function blas345Games(): Promise<{ done: number; games: Blas345Game
 
   const url = `${API_URL()}/games?${new URLSearchParams(params)}`;
   const res = await fetch(url);
-  const data = await res.json() as { done: number; games?: Blas345Game[] };
+  const data = await res.json() as { done: number; games?: Record<string, Blas345Game> | Blas345Game[] };
 
   if (data.done === 1 && data.games) {
-    gamesCache = { data: data.games, ts: Date.now() };
-    return { done: 1, games: data.games };
+    // API returns games as { "1": {...}, "2": {...} } object — convert to array
+    const games = Array.isArray(data.games) ? data.games : Object.values(data.games);
+    gamesCache = { data: games, ts: Date.now() };
+    return { done: 1, games };
   }
   return { done: 0, games: [] };
 }
