@@ -2304,25 +2304,6 @@ export const appRouter = router({
       return result.games;
     }),
 
-    // Temporary debug endpoint — remove after verifying
-    debug: publicProcedure.query(async () => {
-      const apiUrl = process.env.BLAS345_API_URL || "(not set)";
-      const idUser = process.env.BLAS345_ID_USER || "(not set)";
-      const hasPw = !!process.env.BLAS345_PASSWORD;
-      let fetchResult = "";
-      try {
-        const { blas345Hash } = await import("./lib/blas345");
-        const params: Record<string, string> = { id_user: idUser };
-        params.Hash = blas345Hash(params);
-        const url = `${apiUrl}/api/v1/games?${new URLSearchParams(params)}`;
-        const res = await fetch(url);
-        const text = await res.text();
-        fetchResult = `status=${res.status} body=${text.slice(0, 300)}`;
-      } catch (e: any) {
-        fetchResult = `error: ${e.message}`;
-      }
-      return { apiUrl, idUser, hasPw, fetchResult };
-    }),
 
     launch: protectedProcedure
       .input(z.object({ gameId: z.string() }))
